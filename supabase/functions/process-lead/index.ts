@@ -53,17 +53,18 @@ function firstLast(fullName: string, fd: Record<string, string>): [string, strin
   return [parts[0] ?? "", parts.slice(1).join(" ")];
 }
 
-// --- routing --------------------------------------------------------------
-async function matchRule(form_id: string | null, page_id: string | null) {
+// --- routing: form_id > name-pattern > page > default ---------------------
+async function matchRule(form_id: string | null, page_id: string | null, nameHay: string) {
   const { data } = await db.from("routing_rules").select("*").eq("enabled", true);
   const rules = data ?? [];
-  const byForm = rules.filter((r) => r.match_form_id && r.match_form_id === form_id)
-    .sort((a, b) => a.priority - b.priority);
+  const P = (a: any, b: any) => a.priority - b.priority;
+  const byForm = rules.filter((r) => r.match_form_id && r.match_form_id === form_id).sort(P);
   if (byForm.length) return byForm[0];
-  const byPage = rules.filter((r) => !r.match_form_id && r.match_page_id && r.match_page_id === page_id)
-    .sort((a, b) => a.priority - b.priority);
+  const byName = rules.filter((r) => r.match_name_pattern && nameHay.includes(String(r.match_name_pattern).toLowerCase())).sort(P);
+  if (byName.length) return byName[0];
+  const byPage = rules.filter((r) => !r.match_form_id && !r.match_name_pattern && r.match_page_id && r.match_page_id === page_id).sort(P);
   if (byPage.length) return byPage[0];
-  const def = rules.filter((r) => r.is_default).sort((a, b) => a.priority - b.priority);
+  const def = rules.filter((r) => r.is_default).sort(P);
   return def[0] ?? null;
 }
 
@@ -173,6 +174,7 @@ async function processOne(lead: Record<string, any>) {
     ad_name: g.ad_name ?? null,
     platform: g.platform ?? null,
     page_name: page.name ?? null,
+    form_name: null as string | null,
     created_time: createdTime,
     full_name: fullName,
     email,
@@ -187,7 +189,10 @@ async function processOne(lead: Record<string, any>) {
     return { ok: true, reason: "old_lead_skipped" };
   }
 
-  const rule = await matchRule(enrich.form_id, lead.page_id);
+  const { data: formRow } = await db.from("fb_forms").select("name").eq("form_id", enrich.form_id ?? "").maybeSingle();
+  enrich.form_name = formRow?.name ?? null;
+  const nameHay = `${enrich.campaign_name ?? ""} ${enrich.form_name ?? ""} ${enrich.form_id ?? ""}`.toLowerCase();
+  const rule = await matchRule(enrich.form_id, lead.page_id, nameHay);
   if (!rule) {
     await db.from("leads").update({ ...enrich, status: "skipped", crm_status: "skipped", email_status: "skipped", capi_status: "skipped", last_error: "no matching routing rule" }).eq("id", lead.id);
     return { ok: true, reason: "no_rule" };

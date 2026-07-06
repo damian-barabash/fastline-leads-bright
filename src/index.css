@@ -161,3 +161,16 @@ select option { background: var(--panel-solid); }
 
 .spin { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--red); border-radius: 50%; animation: sp 0.7s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
+
+/* ===== sharp corners (override) ===== */
+.panel, .btn, .btn.sm, .btn.primary, .btn.ghost,
+input, select, textarea, .nav-item, .badge, .bars .bar,
+.login-card, .modal, .err, .ok, .stat { border-radius: 0 !important; }
+
+/* ===== brand: caption on its own line, real logo image ===== */
+.brand { align-items: center; }
+.brand b { display: block; }
+.brand span { display: block; margin-top: 4px; }
+.brand .logo-img { height: 40px; width: auto; max-width: 130px; object-fit: contain; display: block; background: none; box-shadow: none; }
+.login-card .brand { flex-direction: column; text-align: center; gap: 12px; }
+.login-card .brand > div { text-align: center; }

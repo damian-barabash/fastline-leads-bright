@@ -16,7 +16,7 @@ export default function Layout({ children }) {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <div className="logo">FL</div>
+          <img src="/logo.png" className="logo-img" alt="Fastline" />
           <div><b>FASTLINE<br />LEADS BRIGHT</b><span>Lead automation</span></div>
         </div>
         {NAV.filter((n) => !n.admin || user.role === "admin").map((n) => (
