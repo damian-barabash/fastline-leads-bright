@@ -174,3 +174,13 @@ input, select, textarea, .nav-item, .badge, .bars .bar,
 .brand .logo-img { height: 40px; width: auto; max-width: 130px; object-fit: contain; display: block; background: none; box-shadow: none; }
 .login-card .brand { flex-direction: column; text-align: center; gap: 12px; }
 .login-card .brand > div { text-align: center; }
+
+/* ===== skeleton loading ===== */
+.skel {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,90,100,0.10) 37%, rgba(255,255,255,0.04) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: 0;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+.skel-line { height: 12px; margin: 7px 0; }

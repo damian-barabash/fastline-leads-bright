@@ -73,7 +73,10 @@ export default function Leads() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan="8" className="muted" style={{ textAlign: "center", padding: 30 }}>Brak leadów</td></tr>}
+            {rows.length === 0 && busy && Array.from({ length: 6 }).map((_, i) => (
+              <tr key={"s" + i}>{Array.from({ length: 8 }).map((_, c) => <td key={c}><div className="skel skel-line" style={{ width: c === 0 ? "70%" : "50%" }} /></td>)}</tr>
+            ))}
+            {rows.length === 0 && !busy && <tr><td colSpan="8" className="muted" style={{ textAlign: "center", padding: 30 }}>Brak leadów</td></tr>}
           </tbody>
         </table>
       </div>

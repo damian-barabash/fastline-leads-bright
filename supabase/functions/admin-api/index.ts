@@ -259,7 +259,16 @@ Deno.serve(async (req: Request) => {
           forms.push(...(j.data ?? []));
           url = j.paging?.next ?? "";
         }
-        for (const f of forms) {
+        // keep only currently-running campaigns: ACTIVE status AND (recent OR has leads).
+        // Facebook keeps thousands of old forms as "ACTIVE" (non-archived) forever, so
+        // recency/leads is the real "running now" signal.
+        const cutoff = Date.now() - 120 * 864e5;
+        const active = forms.filter((f) =>
+          f.status === "ACTIVE" &&
+          ((Number(f.leads_count) > 0) || (f.created_time && new Date(f.created_time).getTime() >= cutoff))
+        );
+        await db.from("fb_forms").delete().eq("page_id", p.page_id);
+        for (const f of active) {
           await db.from("fb_forms").upsert({
             form_id: String(f.id), page_id: String(p.page_id), name: f.name, status: f.status,
             locale: f.locale, questions: f.questions ?? null,
@@ -268,7 +277,7 @@ Deno.serve(async (req: Request) => {
           }, { onConflict: "form_id" });
         }
         await db.from("fb_pages").update({ last_synced_at: new Date().toISOString() }).eq("page_id", body.page_id);
-        return json({ synced: forms.length });
+        return json({ synced: active.length });
       }
       case "fb.forms": {
         let q = db.from("fb_forms").select("form_id,page_id,name,status,created_time,leads_count").order("created_time", { ascending: false });

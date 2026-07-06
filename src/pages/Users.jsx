@@ -5,8 +5,9 @@ export default function Users() {
   const [rows, setRows] = useState([]);
   const [add, setAdd] = useState(null);
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const load = async () => { const r = await api("users.list"); setRows(r.rows); };
+  const load = async () => { try { const r = await api("users.list"); setRows(r.rows); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
 
   const create = async () => {
@@ -49,6 +50,9 @@ export default function Users() {
                   </div>
                 </td>
               </tr>
+            ))}
+            {rows.length === 0 && loading && Array.from({ length: 3 }).map((_, i) => (
+              <tr key={"s" + i}>{Array.from({ length: 5 }).map((_, c) => <td key={c}><div className="skel skel-line" style={{ width: c === 0 ? "60%" : "40%" }} /></td>)}</tr>
             ))}
           </tbody>
         </table>

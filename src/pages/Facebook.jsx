@@ -10,8 +10,9 @@ export default function Facebook() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const load = async () => { const r = await api("fb.pages"); setPages(r.rows); };
+  const load = async () => { try { const r = await api("fb.pages"); setPages(r.rows); } finally { setLoading(false); } };
   useEffect(() => { load(); }, []);
 
   const connect = async () => {
@@ -73,7 +74,10 @@ export default function Facebook() {
                 )}</td>
               </tr>
             ))}
-            {pages.length === 0 && <tr><td colSpan="6" className="muted" style={{ textAlign: "center", padding: 30 }}>Brak połączonych stron</td></tr>}
+            {pages.length === 0 && loading && Array.from({ length: 5 }).map((_, i) => (
+              <tr key={"s" + i}>{Array.from({ length: 6 }).map((_, c) => <td key={c}><div className="skel skel-line" style={{ width: c === 0 ? "70%" : "45%" }} /></td>)}</tr>
+            ))}
+            {pages.length === 0 && !loading && <tr><td colSpan="6" className="muted" style={{ textAlign: "center", padding: 30 }}>Brak połączonych stron</td></tr>}
           </tbody>
         </table>
       </div>

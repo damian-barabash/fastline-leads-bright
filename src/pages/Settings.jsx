@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
+import { SkelCards } from "../components/Skeleton.jsx";
 
 export default function Settings() {
   const { user } = useAuth();
@@ -17,7 +18,7 @@ export default function Settings() {
     setMsg("Zapisano"); setTimeout(() => setMsg(""), 1500);
   };
 
-  if (!s) return <span className="spin" />;
+  if (!s) return (<><div className="topbar"><div><h1>Ustawienia</h1><div className="sub">Konfiguracja globalna automatyzacji</div></div></div><div className="grid cols-2"><SkelCards n={4} cols={2} /></div></>);
 
   return (
     <>

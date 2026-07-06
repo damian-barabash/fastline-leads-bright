@@ -20,7 +20,7 @@ export default function Login() {
     <div className="login-wrap">
       <form className="panel login-card" onSubmit={submit}>
         <div className="brand">
-          <img src="/logo.png" className="logo-img" alt="Fastline" />
+          <img src="/logo.webp" className="logo-img" alt="Fastline" />
           <div><b>FASTLINE<br />LEADS BRIGHT</b><span>Panel logowania</span></div>
         </div>
         {err && <div className="err" style={{ marginBottom: 14 }}>{err}</div>}

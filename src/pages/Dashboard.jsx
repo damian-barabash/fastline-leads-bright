@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
+import { SkelCards, SkelPanel } from "../components/Skeleton.jsx";
 
 function Stat({ k, v, cls }) {
   return <div className="panel stat"><span className="k">{k}</span><span className={"v " + (cls || "")}>{v}</span></div>;
@@ -19,7 +20,13 @@ export default function Dashboard() {
         <div><h1>Pulpit</h1><div className="sub">Przegląd leadów z ostatnich 30 dni</div></div>
       </div>
       {err && <div className="err">{err}</div>}
-      {!s ? <span className="spin" /> : (
+      {!s ? (
+        <div className="grid" style={{ gap: 18 }}>
+          <SkelCards n={4} />
+          <SkelPanel height={120} />
+          <SkelCards n={3} cols={3} />
+        </div>
+      ) : (
         <div className="grid" style={{ gap: 18 }}>
           <div className="grid cols-4">
             <Stat k="Wszystkich leadów" v={s.total} />

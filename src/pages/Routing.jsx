@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
+import { SkelTable } from "../components/Skeleton.jsx";
 
 const blank = () => ({
   name: "", matchType: "form", match_form_id: "", match_page_id: "", match_name_pattern: "",
@@ -24,13 +25,16 @@ export default function Routing() {
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
   const [pageFilter, setPageFilter] = useState("");
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
-    const [r, m, p, f] = await Promise.all([
-      api("rules.list"), api("pd.meta").catch(() => ({ labels: [], owners: [] })),
-      api("fb.pages").catch(() => ({ rows: [] })), api("fb.forms").catch(() => ({ rows: [] })),
-    ]);
-    setRules(r.rows); setMeta(m); setPages(p.rows); setForms(f.rows);
+    try {
+      const [r, m, p, f] = await Promise.all([
+        api("rules.list"), api("pd.meta").catch(() => ({ labels: [], owners: [] })),
+        api("fb.pages").catch(() => ({ rows: [] })), api("fb.forms").catch(() => ({ rows: [] })),
+      ]);
+      setRules(r.rows); setMeta(m); setPages(p.rows); setForms(f.rows);
+    } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
@@ -96,7 +100,9 @@ export default function Routing() {
         <button className={"btn sm" + (tab === "rules" ? " primary" : "")} onClick={() => setTab("rules")}>Reguły ({rules.length})</button>
       </div>
 
-      {tab === "campaigns" && (
+      {loading && <SkelTable cols={6} rows={8} />}
+
+      {!loading && tab === "campaigns" && (
         <>
           <div className="panel" style={{ marginBottom: 14 }}>
             <div className="row wrap" style={{ gap: 10 }}>
@@ -133,7 +139,7 @@ export default function Routing() {
         </>
       )}
 
-      {tab === "rules" && (
+      {!loading && tab === "rules" && (
         <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
           <table className="tbl">
             <thead><tr><th>Nazwa</th><th>Dopasowanie</th><th>Właściciel</th><th>Etykiety</th><th>Trasa</th><th>Prio</th><th></th></tr></thead>
