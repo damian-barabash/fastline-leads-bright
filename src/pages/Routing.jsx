@@ -6,7 +6,7 @@ import { SkelTable } from "../components/Skeleton.jsx";
 const blank = () => ({
   name: "", matchType: "form", match_form_id: "", match_page_id: "", match_name_pattern: "",
   is_default: false, enabled: true, priority: 100,
-  to_crm: true, to_email: false, email_recipients: [], pd_owner_id: null, pd_label_ids: [],
+  to_crm: true, to_email: false, email_recipients: [], email_cc: [], pd_owner_id: null, pd_label_ids: [],
   pd_source_option_id: 26, pd_campaign_from_fb: true, pd_campaign_static: "",
 });
 
@@ -72,7 +72,8 @@ export default function Routing() {
       const rule = {
         id: e.id, name: e.name, is_default: e.is_default, enabled: e.enabled,
         priority: Number(e.priority) || 100, to_crm: e.to_crm, to_email: e.to_email,
-        email_recipients: e.email_recipients, pd_owner_id: e.pd_owner_id ? Number(e.pd_owner_id) : null,
+        email_recipients: e.email_recipients, email_cc: e.email_cc || [],
+        pd_owner_id: e.pd_owner_id ? Number(e.pd_owner_id) : null,
         pd_label_ids: e.pd_label_ids, pd_source_option_id: Number(e.pd_source_option_id) || 26,
         pd_campaign_from_fb: e.pd_campaign_from_fb, pd_campaign_static: e.pd_campaign_static,
         match_form_id: null, match_page_id: null, match_name_pattern: null,
@@ -87,6 +88,8 @@ export default function Routing() {
     } catch (e) { setErr(e.message); }
   };
   const del = async (id) => { if (confirm("Usunąć regułę?")) { await api("rules.delete", { id }); load(); } };
+  const archive = async (form_id) => { await api("form.archive", { form_id }); load(); };
+  const restore = async (form_id) => { await api("form.restore", { form_id }); load(); };
 
   return (
     <>
@@ -121,13 +124,20 @@ export default function Routing() {
                   const r = effRule(f);
                   const custom = r && (r.match_form_id === f.form_id);
                   return (
-                    <tr key={f.form_id}>
+                    <tr key={f.form_id} style={{ opacity: f.archived ? 0.5 : 1 }}>
                       <td><b>{f.name || f.form_id}</b></td>
                       <td className="small muted">{pageName(f.page_id)}</td>
-                      <td><span className={"badge " + (f.status === "ACTIVE" ? "done" : "skipped")}>{f.status || "—"}</span></td>
+                      <td>{f.archived ? <span className="badge skipped">archiwum</span> : <span className={"badge " + (f.status === "ACTIVE" ? "done" : "skipped")}>{f.status || "—"}</span>}</td>
                       <td className="small">{f.leads_count ?? 0}</td>
-                      <td className="small">{destText(r)} {!custom && <span className="muted">(domyślnie)</span>}</td>
-                      <td>{admin && <button className="btn sm" onClick={() => openForForm(f)}>Ustaw trasę</button>}</td>
+                      <td className="small">{f.archived ? <span className="muted">nigdzie</span> : <>{destText(r)} {!custom && <span className="muted">(domyślnie)</span>}</>}</td>
+                      <td>{admin && (
+                        <div className="row" style={{ gap: 6 }}>
+                          {f.archived
+                            ? <button className="btn sm" onClick={() => restore(f.form_id)}>Przywróć</button>
+                            : <><button className="btn sm" onClick={() => openForForm(f)}>Ustaw trasę</button>
+                              <button className="btn sm ghost" title="Zarchiwizuj — leady nigdzie nie trafiają" onClick={() => archive(f.form_id)}>Archiwizuj</button></>}
+                        </div>
+                      )}</td>
                     </tr>
                   );
                 })}
@@ -205,8 +215,12 @@ export default function Routing() {
             </div>
 
             {edit.to_email && (
-              <label className="fld"><span className="lbl">Adresy e-mail (oddziel przecinkiem)</span>
-                <input value={(edit.email_recipients || []).join(", ")} onChange={(e) => setEdit({ ...edit, email_recipients: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></label>
+              <div className="grid cols-2">
+                <label className="fld"><span className="lbl">Adresy e-mail — DO (oddziel przecinkiem)</span>
+                  <input value={(edit.email_recipients || []).join(", ")} onChange={(e) => setEdit({ ...edit, email_recipients: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></label>
+                <label className="fld"><span className="lbl">Kopia — CC (oddziel przecinkiem)</span>
+                  <input value={(edit.email_cc || []).join(", ")} onChange={(e) => setEdit({ ...edit, email_cc: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} /></label>
+              </div>
             )}
 
             {edit.to_crm && (

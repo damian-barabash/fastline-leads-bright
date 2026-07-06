@@ -95,11 +95,13 @@ async function pdCreateLead(token: string, payload: Record<string, unknown>) {
 }
 
 // --- Resend ---------------------------------------------------------------
-async function sendEmail(key: string, from: string, to: string[], subject: string, html: string) {
+async function sendEmail(key: string, from: string, to: string[], cc: string[], subject: string, html: string) {
+  const payload: Record<string, unknown> = { from, to, subject, html };
+  if (cc && cc.length) payload.cc = cc;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "authorization": `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ from, to, subject, html }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`resend failed: ${res.status} ${await res.text()}`);
 }
@@ -189,8 +191,15 @@ async function processOne(lead: Record<string, any>) {
     return { ok: true, reason: "old_lead_skipped" };
   }
 
-  const { data: formRow } = await db.from("fb_forms").select("name").eq("form_id", enrich.form_id ?? "").maybeSingle();
+  const { data: formRow } = await db.from("fb_forms").select("name,archived").eq("form_id", enrich.form_id ?? "").maybeSingle();
   enrich.form_name = formRow?.name ?? null;
+
+  // archived campaign → goes nowhere (restorable from the panel)
+  if (formRow?.archived) {
+    await db.from("leads").update({ ...enrich, matched_rule_id: null, status: "skipped", crm_status: "skipped", email_status: "skipped", capi_status: "skipped", last_error: "kampania zarchiwizowana", processed_at: new Date().toISOString() }).eq("id", lead.id);
+    return { ok: true, reason: "archived" };
+  }
+
   const nameHay = `${enrich.campaign_name ?? ""} ${enrich.form_name ?? ""} ${enrich.form_id ?? ""}`.toLowerCase();
   const rule = await matchRule(enrich.form_id, lead.page_id, nameHay);
   if (!rule) {
@@ -240,7 +249,8 @@ async function processOne(lead: Record<string, any>) {
         <p>Kampania: <b>${enrich.campaign_name ?? "-"}</b><br>Formularz: <b>${enrich.form_id ?? "-"}</b></p>
         <table style="border-collapse:collapse">${rows}</table>
         <p style="color:#aaa;font-size:12px;margin-top:16px">FASTLINE LEADS BRIGHT</p></div>`;
-      await sendEmail(secrets.RESEND_KEY, from, recipients, `Nowy lead: ${fullName || email}`, html);
+      const cc: string[] = rule.email_cc?.length ? rule.email_cc : [];
+      await sendEmail(secrets.RESEND_KEY, from, recipients, cc, `Nowy lead: ${fullName || email}`, html);
       email_status = "sent";
     } catch (e) {
       email_status = "failed";

@@ -280,10 +280,20 @@ Deno.serve(async (req: Request) => {
         return json({ synced: active.length });
       }
       case "fb.forms": {
-        let q = db.from("fb_forms").select("form_id,page_id,name,status,created_time,leads_count").order("created_time", { ascending: false });
+        let q = db.from("fb_forms").select("form_id,page_id,name,status,created_time,leads_count,archived").order("created_time", { ascending: false });
         if (body.page_id) q = q.eq("page_id", body.page_id);
         const { data } = await q;
         return json({ rows: data ?? [] });
+      }
+      case "form.archive": {
+        needAdmin();
+        await db.from("fb_forms").update({ archived: true }).eq("form_id", body.form_id);
+        return json({ ok: true });
+      }
+      case "form.restore": {
+        needAdmin();
+        await db.from("fb_forms").update({ archived: false }).eq("form_id", body.form_id);
+        return json({ ok: true });
       }
 
       default:
