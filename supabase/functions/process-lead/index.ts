@@ -28,6 +28,56 @@ const STD_FIELDS = new Set([
   "city", "state", "province", "country", "zip_code", "post_code", "street_address",
 ]);
 
+// Pipedrive custom varchar fields reject values longer than 255 chars.
+const PD_VARCHAR_MAX = 255;
+function clip(s: string, n = PD_VARCHAR_MAX): string {
+  const str = s ?? "";
+  return str.length > n ? str.slice(0, n) : str;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Robustly pull email / phone / name out of Facebook field_data, even when the
+// form uses custom (localized) question labels like "Imię i nazwisko" / "E-mail"
+// / "Numer Telefonu" instead of the standard english keys. Order of preference:
+//   1. standard FB key  2. localized label match  3. value pattern (email/phone).
+// Returns the keys it consumed so they can be excluded from the "answer" blob.
+function extractContact(fd: Record<string, string>): { email: string; phone: string; fullName: string; usedKeys: Set<string> } {
+  const used = new Set<string>();
+  const entries = Object.entries(fd);
+
+  // --- email ---
+  let email = fd.email ?? "", emailKey = email ? "email" : "";
+  if (!email) for (const [k, v] of entries) { if (/e[\-_ ]?mail/i.test(k) && v) { email = v; emailKey = k; break; } }
+  if (!email) for (const [k, v] of entries) { const c = (v ?? "").trim(); if (EMAIL_RE.test(c)) { email = c; emailKey = k; break; } }
+  if (emailKey) used.add(emailKey);
+
+  // --- phone ---
+  let phone = fd.phone_number ?? "", phoneKey = phone ? "phone_number" : "";
+  if (!phone) for (const [k, v] of entries) { if (/phone|tel|telefon|numer|komó?rk|mobile/i.test(k) && v) { phone = v; phoneKey = k; break; } }
+  if (!phone) for (const [k, v] of entries) {
+    if (used.has(k)) continue;
+    const raw = (v ?? "").trim();
+    if (raw.replace(/[^\d]/g, "").length >= 9 && /^[+\d][\d\s\-()]{7,}$/.test(raw)) { phone = raw; phoneKey = k; break; }
+  }
+  if (phoneKey) used.add(phoneKey);
+
+  // --- name --- (key-based only; never guess a name from an arbitrary value)
+  let fullName = fd.full_name ?? "", nameKey = fullName ? "full_name" : "";
+  if (!fullName && (fd.first_name || fd.last_name)) {
+    fullName = [fd.first_name, fd.last_name].filter(Boolean).join(" ");
+    if (fd.first_name) used.add("first_name");
+    if (fd.last_name) used.add("last_name");
+  }
+  if (!fullName) for (const [k, v] of entries) {
+    if (used.has(k)) continue;
+    if (/(full[_ ]?name|imi[ęe]|nazwisko|\bname\b|imie)/i.test(k) && v && !EMAIL_RE.test(v.trim())) { fullName = v; nameKey = k; break; }
+  }
+  if (nameKey) used.add(nameKey);
+
+  return { email, phone, fullName, usedKeys: used };
+}
+
 let secretsCache: Record<string, string> | null = null;
 async function getSecrets() {
   if (secretsCache) return secretsCache;
@@ -158,12 +208,16 @@ async function processOne(lead: Record<string, any>) {
 
   const fd: Record<string, string> = {};
   for (const f of g.field_data ?? []) fd[f.name] = (f.values ?? []).join(", ");
-  const email = fd.email ?? "";
-  const phone = fd.phone_number ?? "";
-  const fullName = fd.full_name ?? [fd.first_name, fd.last_name].filter(Boolean).join(" ") ?? "";
+  const contact = extractContact(fd);
+  const email = contact.email;
+  const phone = contact.phone;
+  const fullName = contact.fullName;
   const answerParts: string[] = [];
-  for (const [k, v] of Object.entries(fd)) if (!STD_FIELDS.has(k)) answerParts.push(`${k}: ${v}`);
-  const answer = answerParts.join(" | ");
+  for (const [k, v] of Object.entries(fd)) {
+    if (STD_FIELDS.has(k) || contact.usedKeys.has(k)) continue;
+    answerParts.push(`${k}: ${v}`);
+  }
+  const answer = clip(answerParts.join(" | "));
   const createdTime = g.created_time ? new Date(g.created_time).toISOString() : lead.created_time;
 
   const enrich = {
@@ -218,16 +272,16 @@ async function processOne(lead: Record<string, any>) {
       const personId = await pdCreatePerson(secrets.PIPEDRIVE_TOKEN, fullName || email || "Lead", email, phone, ownerId);
       const campaign = rule.pd_campaign_from_fb ? (enrich.campaign_name ?? "") : (rule.pd_campaign_static ?? "");
       const payload: Record<string, unknown> = {
-        title: fullName || email || "Facebook Lead",
+        title: clip(fullName || email || "Facebook Lead"),
         person_id: personId,
         owner_id: ownerId,
         label_ids: rule.pd_label_ids ?? [],
         [F_SOURCE]: rule.pd_source_option_id ?? 26,
-        [F_CAMPAIGN]: campaign,
-        [rule.answer_field_key || F_ANSWER]: answer,
+        [F_CAMPAIGN]: clip(campaign),
+        [rule.answer_field_key || F_ANSWER]: answer, // already clipped to 255
       };
       for (const m of (rule.field_map ?? []) as any[]) {
-        if (m?.question && m?.pd_field_key && fd[m.question] != null) payload[m.pd_field_key] = fd[m.question];
+        if (m?.question && m?.pd_field_key && fd[m.question] != null) payload[m.pd_field_key] = clip(String(fd[m.question]));
       }
       pipedrive_person_id = personId;
       pipedrive_lead_id = await pdCreateLead(secrets.PIPEDRIVE_TOKEN, payload);
