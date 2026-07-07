@@ -283,6 +283,13 @@ async function processOne(lead: Record<string, any>) {
       for (const m of (rule.field_map ?? []) as any[]) {
         if (m?.question && m?.pd_field_key && fd[m.question] != null) payload[m.pd_field_key] = clip(String(fd[m.question]));
       }
+
+      // Visibility: "owner" -> only the assigned owner (+ Pipedrive admins) see the
+      // lead (visible_to=1). "all"/default -> whole company (visible_to=7), i.e. the
+      // Pipedrive account default, so we leave it unset. Pipedrive leads have no
+      // followers, so arbitrary multi-user visibility isn't possible for a lead.
+      if (rule.pd_visibility === "owner") payload.visible_to = "1";
+
       pipedrive_person_id = personId;
       pipedrive_lead_id = await pdCreateLead(secrets.PIPEDRIVE_TOKEN, payload);
       crm_status = "sent";

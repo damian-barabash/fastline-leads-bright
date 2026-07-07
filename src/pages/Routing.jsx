@@ -8,6 +8,7 @@ const blank = () => ({
   is_default: false, enabled: true, priority: 100,
   to_crm: true, to_email: false, email_recipients: [], email_cc: [], pd_owner_id: null, pd_label_ids: [],
   pd_source_option_id: 26, pd_campaign_from_fb: true, pd_campaign_static: "",
+  pd_visibility: "all",
 });
 
 // derive matchType for editing an existing rule
@@ -76,6 +77,7 @@ export default function Routing() {
         pd_owner_id: e.pd_owner_id ? Number(e.pd_owner_id) : null,
         pd_label_ids: e.pd_label_ids, pd_source_option_id: Number(e.pd_source_option_id) || 26,
         pd_campaign_from_fb: e.pd_campaign_from_fb, pd_campaign_static: e.pd_campaign_static,
+        pd_visibility: e.pd_visibility === "owner" ? "owner" : "all",
         match_form_id: null, match_page_id: null, match_name_pattern: null,
       };
       if (!e.is_default) {
@@ -156,7 +158,7 @@ export default function Routing() {
             <tbody>
               {rules.sort((a, b) => a.priority - b.priority).map((r) => (
                 <tr key={r.id} style={{ opacity: r.enabled ? 1 : 0.5 }}>
-                  <td><b>{r.name}</b>{r.is_default && <span className="badge skipped" style={{ marginLeft: 6 }}>domyślna</span>}</td>
+                  <td><b>{r.name}</b>{r.is_default && <span className="badge skipped" style={{ marginLeft: 6 }}>domyślna</span>}{r.pd_visibility === "owner" && <span className="badge" style={{ marginLeft: 6 }} title="Widoczny tylko dla właściciela + administratorów">🔒 właściciel</span>}</td>
                   <td className="small">{r.is_default ? "wszystkie" : r.match_form_id ? "formularz" : r.match_name_pattern ? `nazwa ~ „${r.match_name_pattern}”` : r.match_page_id ? `strona ${pageName(r.match_page_id)}` : "—"}</td>
                   <td className="small">{r.pd_owner_id ? ownerName(r.pd_owner_id) : "—"}</td>
                   <td className="small">{(r.pd_label_ids || []).map(labelName).join(", ") || "—"}</td>
@@ -224,18 +226,32 @@ export default function Routing() {
             )}
 
             {edit.to_crm && (
-              <div className="grid cols-2">
-                <label className="fld"><span className="lbl">Właściciel w Pipedrive</span>
-                  <select value={edit.pd_owner_id || ""} onChange={(e) => setEdit({ ...edit, pd_owner_id: e.target.value })}>
-                    <option value="">— domyślny (Łukasz) —</option>
-                    {meta.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                  </select></label>
-                <label className="fld"><span className="lbl">Etykieta lead</span>
-                  <select value={(edit.pd_label_ids || [])[0] || ""} onChange={(e) => setEdit({ ...edit, pd_label_ids: e.target.value ? [e.target.value] : [] })}>
-                    <option value="">— brak —</option>
-                    {meta.labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                  </select></label>
-              </div>
+              <>
+                <div className="grid cols-2">
+                  <label className="fld"><span className="lbl">Właściciel w Pipedrive</span>
+                    <select value={edit.pd_owner_id || ""} onChange={(e) => setEdit({ ...edit, pd_owner_id: e.target.value })}>
+                      <option value="">— domyślny (Łukasz) —</option>
+                      {meta.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select></label>
+                  <label className="fld"><span className="lbl">Etykieta lead</span>
+                    <select value={(edit.pd_label_ids || [])[0] || ""} onChange={(e) => setEdit({ ...edit, pd_label_ids: e.target.value ? [e.target.value] : [] })}>
+                      <option value="">— brak —</option>
+                      {meta.labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select></label>
+                </div>
+
+                <label className="fld"><span className="lbl">Kto widzi leada w Pipedrive</span>
+                  <select value={edit.pd_visibility || "all"} onChange={(e) => setEdit({ ...edit, pd_visibility: e.target.value })}>
+                    <option value="all">Wszyscy (cała firma)</option>
+                    <option value="owner">Tylko właściciel (+ szefowie)</option>
+                  </select>
+                  {edit.pd_visibility === "owner" && (
+                    <span className="muted small" style={{ marginTop: 6 }}>
+                      Leada zobaczy tylko przypisany właściciel oraz administratorzy Pipedrive (Łukasz, Mariusz). Pipedrive nie pozwala wskazać dowolnych kilku sprzedawców dla pojedynczego leada — dostępne jest „właściciel” albo „cała firma”.
+                    </span>
+                  )}
+                </label>
+              </>
             )}
 
             <label className="fld"><span className="lbl">Priorytet (niższy = ważniejszy)</span>
