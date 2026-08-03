@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fastline Racing Academy</title>
+  <script>
+    // GH Pages SPA fallback: /calendar?t=... -> /#/calendar?t=...
+    (function () {
+      var p = location.pathname.replace(/\/+$/, "");
+      if (p === "/calendar") {
+        location.replace("/#/calendar" + (location.search || ""));
+      } else {
+        location.replace("/");
+      }
+    })();
+  </script>
+</head>
+<body></body>
+</html>

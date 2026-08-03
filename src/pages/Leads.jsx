@@ -100,7 +100,17 @@ export default function Leads() {
               <div className="small"><span className="muted">Formularz:</span> {open.form_id || "—"}</div>
               <div className="small"><span className="muted">Pipedrive lead:</span> {open.pipedrive_lead_id || "—"}</div>
               <div className="small"><span className="muted">Status:</span> <Badge v={open.status} /></div>
+              <div className="small"><span className="muted">E-mail do klienta:</span> {open.client_email_status ? <Badge v={open.client_email_status === "sent" ? "done" : open.client_email_status} /> : "—"}</div>
+              <div className="small"><span className="muted">SMS do klienta:</span> {open.client_sms_status ? <Badge v={open.client_sms_status === "sent" ? "done" : open.client_sms_status} /> : "—"}</div>
             </div>
+            {open.booking_token && (
+              <div className="small muted" style={{ marginBottom: 12 }}>
+                Link do kalendarza klienta:{" "}
+                <a href={`/calendar?t=${open.booking_token}`} target="_blank" rel="noreferrer" style={{ color: "var(--red-2)" }}>
+                  /calendar?t={open.booking_token} ↗
+                </a>
+              </div>
+            )}
             {open.last_error && <div className="err small" style={{ marginBottom: 12 }}>{open.last_error}</div>}
             <h3>Odpowiedzi z formularza</h3>
             <table className="tbl">

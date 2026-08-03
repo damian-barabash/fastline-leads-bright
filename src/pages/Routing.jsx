@@ -22,6 +22,7 @@ export default function Routing() {
   const [meta, setMeta] = useState({ labels: [], owners: [] });
   const [pages, setPages] = useState([]);
   const [forms, setForms] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [edit, setEdit] = useState(null);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
@@ -30,11 +31,12 @@ export default function Routing() {
 
   const load = async () => {
     try {
-      const [r, m, p, f] = await Promise.all([
+      const [r, m, p, f, t] = await Promise.all([
         api("rules.list"), api("pd.meta").catch(() => ({ labels: [], owners: [] })),
         api("fb.pages").catch(() => ({ rows: [] })), api("fb.forms").catch(() => ({ rows: [] })),
+        api("templates.list").catch(() => ({ rows: [] })),
       ]);
-      setRules(r.rows); setMeta(m); setPages(p.rows); setForms(f.rows);
+      setRules(r.rows); setMeta(m); setPages(p.rows); setForms(f.rows); setTemplates(t.rows);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -78,6 +80,8 @@ export default function Routing() {
         pd_label_ids: e.pd_label_ids, pd_source_option_id: Number(e.pd_source_option_id) || 26,
         pd_campaign_from_fb: e.pd_campaign_from_fb, pd_campaign_static: e.pd_campaign_static,
         pd_visibility: e.pd_visibility === "owner" ? "owner" : "all",
+        client_template_id: e.client_template_id || null,
+        client_msg_off: !!e.client_msg_off,
         match_form_id: null, match_page_id: null, match_name_pattern: null,
       };
       if (!e.is_default) {
@@ -253,6 +257,18 @@ export default function Routing() {
                 </label>
               </>
             )}
+
+            <label className="fld"><span className="lbl">Wiadomość do klienta (e-mail/SMS z kalendarzem)</span>
+              <select
+                value={edit.client_msg_off ? "off" : (edit.client_template_id || "auto")}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEdit({ ...edit, client_msg_off: v === "off", client_template_id: v === "auto" || v === "off" ? null : v });
+                }}>
+                <option value="auto">Automatycznie (dopasowanie wg szablonów)</option>
+                <option value="off">Nie wysyłaj wiadomości</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>Zawsze: {t.name}</option>)}
+              </select></label>
 
             <label className="fld"><span className="lbl">Priorytet (niższy = ważniejszy)</span>
               <input type="number" value={edit.priority} onChange={(e) => setEdit({ ...edit, priority: e.target.value })} /></label>

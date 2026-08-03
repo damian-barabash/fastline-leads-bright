@@ -4,7 +4,9 @@ import { useAuth } from "../auth.jsx";
 const NAV = [
   { to: "/", ico: "▚", label: "Pulpit", end: true },
   { to: "/leads", ico: "☰", label: "Leady" },
+  { to: "/bookings", ico: "◷", label: "Rezerwacje" },
   { to: "/routing", ico: "⚙", label: "Sortowanie" },
+  { to: "/messages", ico: "✉", label: "Wiadomości" },
   { to: "/facebook", ico: "◎", label: "Facebook" },
   { to: "/settings", ico: "✦", label: "Ustawienia" },
   { to: "/users", ico: "◈", label: "Użytkownicy", admin: true },

@@ -1,0 +1,114 @@
+/* ===== Publiczny kalendarz oddzwonień — biały motyw, czerwone akcenty ===== */
+body.booking-mode {
+  background: #f5f2f2;
+  color: #221a1c;
+  font-family: -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+}
+
+.bk-wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 28px 14px 48px; }
+.bk-card {
+  width: 100%; max-width: 880px; background: #fff;
+  border: 1px solid #eadfe0; border-top: 4px solid #e11d2a;
+  box-shadow: 0 14px 44px rgba(34, 10, 14, 0.10);
+}
+.bk-head { background: #17090b; padding: 18px 26px; display: flex; align-items: center; justify-content: center; }
+.bk-head img { height: 46px; width: auto; display: block; }
+
+.bk-title { padding: 24px 28px 6px; }
+.bk-title h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0.2px; }
+.bk-title p { margin: 0; color: #8a7276; font-size: 14px; line-height: 1.5; }
+.bk-title .bk-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; color: #6f5a5e; font-size: 13px; }
+.bk-title .bk-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.bk-title .bk-meta b { color: #e11d2a; }
+
+.bk-current {
+  margin: 16px 28px 0; padding: 12px 16px; font-size: 14px;
+  background: #fdf0f1; border: 1px solid #f5c9cd; color: #8c1520;
+}
+.bk-current b { color: #e11d2a; }
+
+.bk-body { display: grid; grid-template-columns: 1.2fr 1fr; gap: 0; padding: 18px 10px 26px; }
+@media (max-width: 720px) { .bk-body { grid-template-columns: 1fr; } }
+
+/* ---- kalendarz miesiąca ---- */
+.bk-cal { padding: 10px 18px; }
+.bk-cal-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.bk-cal-top b { font-size: 16px; text-transform: capitalize; }
+.bk-nav { display: flex; gap: 6px; }
+.bk-nav button {
+  width: 36px; height: 36px; border: 1px solid #eadfe0; background: #fff; color: #e11d2a;
+  font-size: 18px; cursor: pointer; display: grid; place-items: center; transition: all .15s;
+}
+.bk-nav button:hover:not(:disabled) { background: #fdf0f1; border-color: #e11d2a; }
+.bk-nav button:disabled { opacity: .3; cursor: default; }
+
+.bk-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.bk-dow { text-align: center; font-size: 11px; color: #a08a8d; font-weight: 600; letter-spacing: .6px; padding: 6px 0; }
+.bk-day { aspect-ratio: 1; display: grid; place-items: center; }
+.bk-day button {
+  width: 100%; height: 100%; max-width: 52px; max-height: 52px;
+  border: none; background: transparent; color: #c9b7ba; font-size: 14px; cursor: default;
+  display: grid; place-items: center; position: relative; transition: all .15s;
+}
+.bk-day button.av {
+  background: #fdeced; color: #b3121f; font-weight: 700; cursor: pointer;
+}
+.bk-day button.av:hover { background: #f9d6d9; }
+.bk-day button.sel { background: #e11d2a !important; color: #fff !important; box-shadow: 0 6px 16px rgba(225, 29, 42, .38); }
+.bk-day button.today::after { content: ""; position: absolute; bottom: 5px; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+
+/* ---- sloty ---- */
+.bk-slots { padding: 10px 18px; border-left: 1px solid #f3e8e9; min-height: 320px; }
+@media (max-width: 720px) { .bk-slots { border-left: none; border-top: 1px solid #f3e8e9; margin-top: 10px; padding-top: 18px; } }
+.bk-slots h2 { margin: 4px 0 4px; font-size: 15px; text-transform: capitalize; }
+.bk-slots .bk-hint { color: #a08a8d; font-size: 12.5px; margin: 0 0 14px; }
+.bk-slot-list { display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto; padding-right: 4px; }
+@media (max-width: 720px) { .bk-slot-list { max-height: none; } }
+
+.bk-slot { display: flex; gap: 8px; }
+.bk-slot > button.time {
+  flex: 1; padding: 13px 10px; border: 1px solid #e9c9cc; background: #fff; color: #b3121f;
+  font-size: 15px; font-weight: 700; cursor: pointer; transition: all .15s; letter-spacing: .5px;
+}
+.bk-slot > button.time:hover:not(:disabled) { border-color: #e11d2a; background: #fdf5f5; }
+.bk-slot > button.time:disabled { color: #d4c2c4; border-color: #f0e5e6; text-decoration: line-through; cursor: default; background: #fbf8f8; }
+.bk-slot.armed > button.time { flex: 0 0 44%; background: #6f5a5e; border-color: #6f5a5e; color: #fff; }
+.bk-slot > button.confirm {
+  flex: 1; border: none; background: linear-gradient(145deg, #ff3b47, #e11d2a); color: #fff;
+  font-size: 14px; font-weight: 800; cursor: pointer; letter-spacing: .4px;
+  box-shadow: 0 6px 16px rgba(225, 29, 42, .35); transition: filter .15s;
+}
+.bk-slot > button.confirm:hover { filter: brightness(1.08); }
+.bk-empty { color: #a08a8d; font-size: 14px; padding: 26px 4px; text-align: center; }
+
+/* ---- ekrany statusów ---- */
+.bk-center { padding: 56px 28px 64px; text-align: center; }
+.bk-center .bk-icon {
+  width: 74px; height: 74px; margin: 0 auto 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 34px; color: #fff;
+  background: linear-gradient(145deg, #ff3b47, #e11d2a); box-shadow: 0 10px 28px rgba(225, 29, 42, .4);
+}
+.bk-center .bk-icon.err { background: #6f5a5e; box-shadow: none; }
+.bk-center h1 { margin: 0 0 10px; font-size: 22px; }
+.bk-center p { margin: 0 auto; max-width: 420px; color: #8a7276; font-size: 15px; line-height: 1.6; }
+.bk-center .bk-when { margin: 18px auto 4px; font-size: 18px; font-weight: 800; color: #e11d2a; text-transform: capitalize; }
+.bk-center button.bk-again {
+  margin-top: 26px; padding: 12px 26px; border: 1px solid #e9c9cc; background: #fff; color: #b3121f;
+  font-size: 14px; font-weight: 700; cursor: pointer; transition: all .15s;
+}
+.bk-center button.bk-again:hover { border-color: #e11d2a; background: #fdf5f5; }
+
+.bk-foot { margin-top: 18px; color: #a08a8d; font-size: 12px; text-align: center; line-height: 1.6; }
+.bk-foot a { color: #e11d2a; text-decoration: none; font-weight: 600; }
+
+.bk-spin {
+  width: 34px; height: 34px; margin: 90px auto; border: 3px solid #f0e0e2; border-top-color: #e11d2a;
+  border-radius: 50%; animation: bksp .7s linear infinite;
+}
+@keyframes bksp { to { transform: rotate(360deg); } }
+
+.bk-toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: #17090b; color: #fff; padding: 12px 22px; font-size: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); z-index: 10; max-width: 92vw; text-align: center;
+}

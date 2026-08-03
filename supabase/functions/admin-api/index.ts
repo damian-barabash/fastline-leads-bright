@@ -56,6 +56,60 @@ async function fbGet(url: string) {
   return j;
 }
 
+// ---- wiadomości do klienta: helpery testowej wysyłki (kopia z process-lead) ----
+const escHtml = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function renderText(tpl: string, vars: Record<string, string>): string {
+  return String(tpl ?? "").replace(/\{\{\s*link\s*\}\}/g, vars.link).replace(/\{\{\s*imie\s*\}\}/g, vars.imie);
+}
+function brandedEmailHtml(bodyTpl: string, vars: Record<string, string>): string {
+  const btn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px auto"><tr><td style="background:linear-gradient(145deg,#ff3b47,#e11d2a);background-color:#e11d2a;"><a href="${vars.link}" style="display:inline-block;padding:15px 34px;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;font-family:Arial,sans-serif;letter-spacing:.4px">WYBIERZ TERMIN ROZMOWY&nbsp;›</a></td></tr></table>`;
+  const paras = escHtml(bodyTpl)
+    .replace(/\{\{\s*imie\s*\}\}/g, escHtml(vars.imie))
+    .split(/\n/)
+    .map((l) => {
+      const t = l.trim();
+      if (!t) return "";
+      if (/^\{\{\s*link\s*\}\}$/.test(t)) return btn;
+      return `<p style="margin:0 0 12px;color:#2b2325;font-size:15px;line-height:1.6;font-family:Arial,sans-serif">${t.replace(/\{\{\s*link\s*\}\}/g, `<a href="${vars.link}" style="color:#e11d2a;font-weight:700">${vars.link}</a>`)}</p>`;
+    })
+    .join("");
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#f3eeef">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3eeef;padding:28px 12px"><tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-top:4px solid #e11d2a;box-shadow:0 8px 30px rgba(0,0,0,.08)">
+      <tr><td style="background:#17090b;padding:22px 32px" align="center">
+        <img src="${vars.logo_url}" alt="Fastline Racing Academy" height="42" style="display:block;height:42px;width:auto;border:0">
+      </td></tr>
+      <tr><td style="padding:32px 32px 20px">${paras}</td></tr>
+      <tr><td style="padding:0 32px 28px">
+        <div style="border-top:1px solid #eee2e3;padding-top:16px;color:#a08a8d;font-size:12px;font-family:Arial,sans-serif;line-height:1.6">
+          Fastline Racing Academy · <a href="https://www.fastlineracingacademy.pl" style="color:#e11d2a;text-decoration:none">fastlineracingacademy.pl</a><br>
+          Ta wiadomość została wysłana automatycznie po Twoim zgłoszeniu.
+        </div>
+      </td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+}
+async function sendResend(key: string, from: string, to: string, subject: string, html: string) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "authorization": `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ from, to: [to], subject, html }),
+  });
+  if (!res.ok) throw new Error(`resend: ${res.status} ${await res.text()}`);
+}
+async function sendSms(token: string, from: string, phone: string, message: string) {
+  let to = phone.replace(/[^\d]/g, "");
+  if (to.length === 9) to = "48" + to;
+  const params = new URLSearchParams({ to, from, message, format: "json", encoding: "utf-8" });
+  const res = await fetch("https://api.smsapi.pl/sms.do", {
+    method: "POST",
+    headers: { "authorization": `Bearer ${token}`, "content-type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) throw new Error(`smsapi: ${JSON.stringify(j)}`);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method" }, 405);
@@ -95,27 +149,112 @@ Deno.serve(async (req: Request) => {
       }
 
       case "stats": {
-        const since = new Date(Date.now() - 30 * 864e5).toISOString();
-        const { data: rows } = await db.from("leads").select("status,crm_status,received_at").gte("received_at", since);
+        // zakres dat z filtra Pulpitu (domyślnie ostatnie 30 dni)
+        const to = body.to ? new Date(body.to) : new Date();
+        const from = body.from ? new Date(body.from) : new Date(to.getTime() - 30 * 864e5);
+        const toEnd = new Date(to.getTime() + 864e5 - 1); // włącznie z dniem "do"
+        const { data: rows } = await db.from("leads")
+          .select("status,crm_status,email_status,client_email_status,client_sms_status,received_at,campaign_name,page_name,form_name,form_id")
+          .gte("received_at", from.toISOString()).lte("received_at", toEnd.toISOString())
+          .order("received_at", { ascending: true }).limit(10000);
         const all = rows ?? [];
         const todayStr = new Date().toISOString().slice(0, 10);
         const byDayMap: Record<string, number> = {};
+        const byCampaign: Record<string, number> = {};
+        const byPage: Record<string, number> = {};
         for (const r of all) {
           const d = String(r.received_at).slice(0, 10);
           byDayMap[d] = (byDayMap[d] ?? 0) + 1;
+          const c = r.campaign_name || r.form_name || r.form_id || "(nieznana)";
+          byCampaign[c] = (byCampaign[c] ?? 0) + 1;
+          const p = r.page_name || "(nieznana)";
+          byPage[p] = (byPage[p] ?? 0) + 1;
         }
         const byDay = Object.entries(byDayMap).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
+        const top = (m: Record<string, number>, n = 8) => Object.entries(m).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, n);
         const { count: total } = await db.from("leads").select("*", { count: "exact", head: true });
+        // rezerwacje: w zakresie + nadchodzące
+        const { data: bkRange } = await db.from("callback_bookings").select("id").eq("status", "booked")
+          .gte("created_at", from.toISOString()).lte("created_at", toEnd.toISOString());
+        const { count: bkUpcoming } = await db.from("callback_bookings").select("*", { count: "exact", head: true })
+          .eq("status", "booked").gte("slot_at", new Date().toISOString());
         return json({
           total: total ?? 0,
+          range: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+          inRange: all.length,
           last30: all.length,
           today: all.filter((r) => String(r.received_at).slice(0, 10) === todayStr).length,
           done: all.filter((r) => r.status === "done").length,
           failed: all.filter((r) => r.status === "failed").length,
           pending: all.filter((r) => r.status === "pending" || r.status === "processing").length,
+          skipped: all.filter((r) => r.status === "skipped").length,
           crmSent: all.filter((r) => r.crm_status === "sent").length,
+          emailSent: all.filter((r) => r.email_status === "sent").length,
+          clientEmailSent: all.filter((r) => r.client_email_status === "sent").length,
+          clientSmsSent: all.filter((r) => r.client_sms_status === "sent").length,
+          bookingsInRange: (bkRange ?? []).length,
+          bookingsUpcoming: bkUpcoming ?? 0,
           byDay,
+          topCampaigns: top(byCampaign),
+          topPages: top(byPage, 6),
         });
+      }
+
+      // ---- szablony wiadomości do klienta ----
+      case "templates.list": {
+        const { data } = await db.from("client_templates").select("*").order("priority", { ascending: true });
+        return json({ rows: data ?? [] });
+      }
+      case "templates.upsert": {
+        needAdmin();
+        const t = { ...body.template, updated_at: new Date().toISOString() };
+        if (t.is_default) await db.from("client_templates").update({ is_default: false }).neq("id", t.id ?? "00000000-0000-0000-0000-000000000000");
+        if (!t.id) delete t.id;
+        const { data, error } = await db.from("client_templates").upsert(t).select().single();
+        if (error) throw new Error(error.message);
+        return json({ template: data });
+      }
+      case "templates.delete":
+        needAdmin();
+        await db.from("client_templates").delete().eq("id", body.id);
+        return json({ ok: true });
+
+      // ---- rezerwacje oddzwonień ----
+      case "bookings.list": {
+        const mode = body.mode === "all" ? "all" : "upcoming";
+        let q = db.from("callback_bookings").select("*").order("slot_at", { ascending: mode === "upcoming" });
+        if (mode === "upcoming") q = q.eq("status", "booked").gte("slot_at", new Date(Date.now() - 3600_000).toISOString());
+        const { data: bks } = await q.limit(300);
+        const leadIds = [...new Set((bks ?? []).map((b) => b.lead_id))];
+        let leadsById: Record<string, any> = {};
+        if (leadIds.length) {
+          const { data: ls } = await db.from("leads").select("id,full_name,email,phone,campaign_name,form_name,page_name,pipedrive_lead_id").in("id", leadIds);
+          leadsById = Object.fromEntries((ls ?? []).map((l) => [l.id, l]));
+        }
+        return json({ rows: (bks ?? []).map((b) => ({ ...b, lead: leadsById[b.lead_id] ?? null })) });
+      }
+
+      // ---- testowa wysyłka (Ustawienia) ----
+      case "client.testSend": {
+        needAdmin();
+        const { data: tpl } = await db.from("client_templates").select("*").eq("id", body.template_id).maybeSingle();
+        if (!tpl) throw new Error("Nie znaleziono szablonu");
+        const { data: st } = await db.from("settings").select("key,value");
+        const settings = Object.fromEntries((st ?? []).map((r) => [r.key, r.value]));
+        const base = String(settings.booking_url_base ?? "https://leads.fastlineracingacademy.pl/calendar");
+        const vars = { link: `${base}?t=demo`, imie: "Anna", logo_url: "https://leads.fastlineracingacademy.pl/logo.webp" };
+        const out: Record<string, string> = {};
+        if (body.email) {
+          const from = `Fastline Racing Academy <${String(settings.email_from ?? "leads@fastlineracingacademy.pl")}>`;
+          await sendResend(secrets.RESEND_KEY, from, String(body.email), "[TEST] " + renderText(tpl.email_subject, vars), brandedEmailHtml(tpl.email_body, vars));
+          out.email = "sent";
+        }
+        if (body.phone) {
+          if (!secrets.SMSAPI_TOKEN) throw new Error("Brak SMSAPI_TOKEN w sekretach");
+          await sendSms(secrets.SMSAPI_TOKEN, String(settings.sms_sender ?? "FASTLINE RA"), String(body.phone), renderText(tpl.sms_body, vars));
+          out.sms = "sent";
+        }
+        return json({ ok: true, ...out });
       }
 
       case "leads.list": {

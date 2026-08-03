@@ -156,6 +156,73 @@ async function sendEmail(key: string, from: string, to: string[], cc: string[], 
   if (!res.ok) throw new Error(`resend failed: ${res.status} ${await res.text()}`);
 }
 
+// --- wiadomości do klienta (kalendarz oddzwonień) --------------------------
+function genToken(): string {
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+// szablon: nadpisanie z reguły -> dopasowanie wzorca -> domyślny
+async function matchTemplate(rule: any, nameHay: string) {
+  const { data } = await db.from("client_templates").select("*").eq("enabled", true).order("priority", { ascending: true });
+  const tpls = data ?? [];
+  if (rule?.client_template_id) return tpls.find((t) => t.id === rule.client_template_id) ?? null;
+  for (const t of tpls) {
+    if ((t.match_patterns ?? []).some((p: string) => p && nameHay.includes(String(p).toLowerCase()))) return t;
+  }
+  return tpls.find((t) => t.is_default) ?? null;
+}
+
+function renderText(tpl: string, vars: Record<string, string>): string {
+  return String(tpl ?? "").replace(/\{\{\s*link\s*\}\}/g, vars.link).replace(/\{\{\s*imie\s*\}\}/g, vars.imie);
+}
+
+const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// brandowany szablon e-maila: logo, czerwone akcenty, przycisk CTA
+function brandedEmailHtml(bodyTpl: string, vars: Record<string, string>): string {
+  const btn = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px auto"><tr><td style="background:linear-gradient(145deg,#ff3b47,#e11d2a);background-color:#e11d2a;"><a href="${vars.link}" style="display:inline-block;padding:15px 34px;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;font-family:Arial,sans-serif;letter-spacing:.4px">WYBIERZ TERMIN ROZMOWY&nbsp;›</a></td></tr></table>`;
+  const paras = esc(bodyTpl)
+    .replace(/\{\{\s*imie\s*\}\}/g, esc(vars.imie))
+    .split(/\n/)
+    .map((l) => {
+      const t = l.trim();
+      if (!t) return "";
+      if (/^\{\{\s*link\s*\}\}$/.test(t)) return btn;
+      return `<p style="margin:0 0 12px;color:#2b2325;font-size:15px;line-height:1.6;font-family:Arial,sans-serif">${t.replace(/\{\{\s*link\s*\}\}/g, `<a href="${vars.link}" style="color:#e11d2a;font-weight:700">${vars.link}</a>`)}</p>`;
+    })
+    .join("");
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#f3eeef">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3eeef;padding:28px 12px"><tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-top:4px solid #e11d2a;box-shadow:0 8px 30px rgba(0,0,0,.08)">
+      <tr><td style="background:#17090b;padding:22px 32px" align="center">
+        <img src="${vars.logo_url}" alt="Fastline Racing Academy" height="42" style="display:block;height:42px;width:auto;border:0">
+      </td></tr>
+      <tr><td style="padding:32px 32px 20px">${paras}</td></tr>
+      <tr><td style="padding:0 32px 28px">
+        <div style="border-top:1px solid #eee2e3;padding-top:16px;color:#a08a8d;font-size:12px;font-family:Arial,sans-serif;line-height:1.6">
+          Fastline Racing Academy · <a href="https://www.fastlineracingacademy.pl" style="color:#e11d2a;text-decoration:none">fastlineracingacademy.pl</a><br>
+          Ta wiadomość została wysłana automatycznie po Twoim zgłoszeniu.
+        </div>
+      </td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+}
+
+// SMSAPI.pl — pojedynczy SMS (utf-8, pole nadawcy z ustawień)
+async function sendSms(token: string, from: string, phone: string, message: string) {
+  let to = phone.replace(/[^\d]/g, "");
+  if (to.length === 9) to = "48" + to;
+  const params = new URLSearchParams({ to, from, message, format: "json", encoding: "utf-8" });
+  const res = await fetch("https://api.smsapi.pl/sms.do", {
+    method: "POST",
+    headers: { "authorization": `Bearer ${token}`, "content-type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) throw new Error(`smsapi: ${JSON.stringify(j)}`);
+}
+
 // --- CAPI -----------------------------------------------------------------
 async function sendCapi(
   datasetId: string, token: string, actionSource: string, leadgenId: string,
@@ -333,6 +400,42 @@ async function processOne(lead: Record<string, any>) {
     }
   }
 
+  // --- wiadomość do klienta: e-mail + SMS z osobistym linkiem do kalendarza ---
+  // Celowo NIE wpływa na główny status leada (CRM/e-mail/CAPI działają jak dotąd).
+  let client_email_status = lead.client_email_status ?? "skipped";
+  let client_sms_status = lead.client_sms_status ?? "skipped";
+  let client_template_id: string | null = lead.client_template_id ?? null;
+  let booking_token: string | null = lead.booking_token ?? null;
+  try {
+    const alreadyNotified = lead.client_email_status === "sent" || lead.client_sms_status === "sent";
+    if (!rule.client_msg_off && !alreadyNotified && (email || phone)) {
+      const tpl = await matchTemplate(rule, nameHay);
+      if (tpl) {
+        client_template_id = tpl.id;
+        if (!booking_token) booking_token = genToken();
+        // token musi być w bazie zanim klient kliknie link
+        await db.from("leads").update({ booking_token }).eq("id", lead.id);
+        const base = String(settings.booking_url_base ?? "https://leads.fastlineracingacademy.pl/calendar");
+        const link = `${base}?t=${booking_token}`;
+        const firstName = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
+        const vars = { link, imie: firstName, logo_url: "https://leads.fastlineracingacademy.pl/logo.webp" };
+        if (settings.client_email_enabled === true && tpl.send_email && email) {
+          try {
+            const from = `Fastline Racing Academy <${String(settings.email_from ?? "leads@fastlineracingacademy.pl")}>`;
+            await sendEmail(secrets.RESEND_KEY, from, [email], [], renderText(tpl.email_subject, vars), brandedEmailHtml(tpl.email_body, vars));
+            client_email_status = "sent";
+          } catch (e) { client_email_status = "failed"; errors.push("client_email: " + String(e)); }
+        }
+        if (settings.client_sms_enabled === true && tpl.send_sms && phone && secrets.SMSAPI_TOKEN) {
+          try {
+            await sendSms(secrets.SMSAPI_TOKEN, String(settings.sms_sender ?? "FASTLINE RA"), phone, renderText(tpl.sms_body, vars));
+            client_sms_status = "sent";
+          } catch (e) { client_sms_status = "failed"; errors.push("client_sms: " + String(e)); }
+        }
+      }
+    }
+  } catch (e) { errors.push("client_msg: " + String(e)); }
+
   const anyFailed = [crm_status, email_status, capi_status].includes("failed");
   const status = anyFailed ? "failed" : (crm_status === "skipped" && email_status === "skipped" ? "skipped" : "done");
 
@@ -340,6 +443,7 @@ async function processOne(lead: Record<string, any>) {
     ...enrich,
     matched_rule_id: rule.id,
     crm_status, email_status, capi_status, status,
+    booking_token, client_template_id, client_email_status, client_sms_status,
     pipedrive_lead_id, pipedrive_person_id,
     last_error: errors.length ? errors.join(" || ") : null,
     processed_at: new Date().toISOString(),
