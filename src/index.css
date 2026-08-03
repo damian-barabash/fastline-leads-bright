@@ -184,3 +184,40 @@ input, select, textarea, .nav-item, .badge, .bars .bar,
 }
 @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 .skel-line { height: 12px; margin: 7px 0; }
+
+/* ===== Rezerwacje: duży kalendarz miesięczny (pon–pt) ===== */
+.calx-head {
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  border-bottom: 1px solid var(--border);
+}
+.calx-head div {
+  padding: 12px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
+  color: var(--muted-2); font-weight: 600; border-right: 1px solid rgba(255, 90, 100, 0.07);
+}
+.calx-head div:last-child { border-right: none; }
+.calx-week { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid rgba(255, 90, 100, 0.07); }
+.calx-week:last-child { border-bottom: none; }
+.calx-day {
+  min-height: 118px; padding: 10px 10px 12px; border-right: 1px solid rgba(255, 90, 100, 0.07);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.calx-day:last-child { border-right: none; }
+.calx-day.out { opacity: 0.32; }
+.calx-day.past { background: rgba(0, 0, 0, 0.18); }
+.calx-day.today { background: var(--red-soft); box-shadow: inset 0 0 0 1px rgba(255, 90, 100, 0.35); }
+.calx-num { font-size: 13px; color: var(--muted); font-weight: 600; }
+.calx-today-pill {
+  background: var(--red); color: #fff; font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px;
+  padding: 3px 8px; display: inline-block;
+}
+.calx-items { display: flex; flex-direction: column; gap: 5px; }
+.calx-chip {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: rgba(225, 29, 42, 0.16); border: 1px solid rgba(255, 90, 100, 0.30);
+  color: var(--text); font-size: 12px; padding: 5px 8px; font-family: inherit;
+  transition: all 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.calx-chip b { color: var(--red-2); margin-right: 4px; }
+.calx-chip:hover { background: rgba(225, 29, 42, 0.30); border-color: var(--red); }
+.calx-chip.gone { opacity: 0.5; }
+.calx-chip.gone b { color: var(--muted); }

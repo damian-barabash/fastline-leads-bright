@@ -85,12 +85,17 @@ export default function Booking() {
     return { min: { y: +f.slice(0, 4), m: +f.slice(5, 7) - 1 }, max: { y: +l.slice(0, 4), m: +l.slice(5, 7) - 1 } };
   }, [data]);
 
-  const nav = (dir) => {
-    if (!cursor || !monthBounds) return;
+  const canNav = (dir) => {
+    if (!cursor || !monthBounds) return false;
     let { y, m } = cursor;
     m += dir; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
     const v = y * 12 + m;
-    if (v < monthBounds.min.y * 12 + monthBounds.min.m || v > monthBounds.max.y * 12 + monthBounds.max.m) return;
+    return v >= monthBounds.min.y * 12 + monthBounds.min.m && v <= monthBounds.max.y * 12 + monthBounds.max.m;
+  };
+  const nav = (dir) => {
+    if (!canNav(dir)) return;
+    let { y, m } = cursor;
+    m += dir; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; }
     setCursor({ y, m });
   };
 
@@ -174,8 +179,8 @@ export default function Booking() {
                 <div className="bk-cal-top">
                   <b>{cursor ? monthLabel(cursor.y, cursor.m) : ""}</b>
                   <div className="bk-nav">
-                    <button onClick={() => nav(-1)} aria-label="Poprzedni miesiąc">‹</button>
-                    <button onClick={() => nav(1)} aria-label="Następny miesiąc">›</button>
+                    <button onClick={() => nav(-1)} disabled={!canNav(-1)} aria-label="Poprzedni miesiąc">‹</button>
+                    <button onClick={() => nav(1)} disabled={!canNav(1)} aria-label="Następny miesiąc">›</button>
                   </div>
                 </div>
                 <div className="bk-grid">

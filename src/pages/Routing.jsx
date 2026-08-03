@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { SkelTable } from "../components/Skeleton.jsx";
+import { IconTrash, IconLock } from "../components/Icons.jsx";
 
 const blank = () => ({
   name: "", matchType: "form", match_form_id: "", match_page_id: "", match_name_pattern: "",
@@ -162,13 +163,13 @@ export default function Routing() {
             <tbody>
               {rules.sort((a, b) => a.priority - b.priority).map((r) => (
                 <tr key={r.id} style={{ opacity: r.enabled ? 1 : 0.5 }}>
-                  <td><b>{r.name}</b>{r.is_default && <span className="badge skipped" style={{ marginLeft: 6 }}>domyślna</span>}{r.pd_visibility === "owner" && <span className="badge" style={{ marginLeft: 6 }} title="Widoczny tylko dla właściciela + administratorów">🔒 właściciel</span>}</td>
+                  <td><b>{r.name}</b>{r.is_default && <span className="badge skipped" style={{ marginLeft: 6 }}>domyślna</span>}{r.pd_visibility === "owner" && <span className="badge" style={{ marginLeft: 6, gap: 4 }} title="Widoczny tylko dla właściciela + administratorów"><IconLock /> właściciel</span>}</td>
                   <td className="small">{r.is_default ? "wszystkie" : r.match_form_id ? "formularz" : r.match_name_pattern ? `nazwa ~ „${r.match_name_pattern}”` : r.match_page_id ? `strona ${pageName(r.match_page_id)}` : "—"}</td>
                   <td className="small">{r.pd_owner_id ? ownerName(r.pd_owner_id) : "—"}</td>
                   <td className="small">{(r.pd_label_ids || []).map(labelName).join(", ") || "—"}</td>
                   <td className="small">{destText(r)}</td>
                   <td className="small">{r.priority}</td>
-                  <td>{admin && <div className="row" style={{ gap: 6 }}><button className="btn sm ghost" onClick={() => setEdit({ ...r, matchType: typeOf(r) })}>Edytuj</button>{!r.is_default && <button className="btn sm ghost" onClick={() => del(r.id)}>🗑</button>}</div>}</td>
+                  <td>{admin && <div className="row" style={{ gap: 6 }}><button className="btn sm ghost" onClick={() => setEdit({ ...r, matchType: typeOf(r) })}>Edytuj</button>{!r.is_default && <button className="btn sm ghost" title="Usuń regułę" onClick={() => del(r.id)}><IconTrash /></button>}</div>}</td>
                 </tr>
               ))}
             </tbody>

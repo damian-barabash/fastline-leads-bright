@@ -77,7 +77,8 @@ function buildGrid(cfg: Cfg, now: Date) {
   // idziemy dzień po dniu wg lokalnego kalendarza
   const startLocal = localParts(now.getTime(), cfg.tz);
   let cur = new Date(Date.UTC(startLocal.y, startLocal.m - 1, startLocal.d, 12, 0)); // południe ≈ stabilny dzień
-  for (let i = 0; i < cfg.horizon_days + 7 && days.length < cfg.horizon_days; i++) {
+  // zapas iteracji: horyzont liczony w dniach roboczych, kalendarz ma też weekendy
+  for (let i = 0; i < cfg.horizon_days * 2 + 7 && days.length < cfg.horizon_days; i++) {
     const lp = localParts(cur.getTime(), cfg.tz);
     if (cfg.days.includes(lp.weekday)) {
       const slots: string[] = [];
