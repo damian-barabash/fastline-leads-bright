@@ -195,8 +195,8 @@ function brandedEmailHtml(bodyTpl: string, vars: Record<string, string>): string
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3eeef">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3eeef;padding:28px 12px"><tr><td align="center">
     <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-top:4px solid #e11d2a;box-shadow:0 8px 30px rgba(0,0,0,.08)">
-      <tr><td style="background:#17090b;padding:22px 32px" align="center">
-        <img src="${vars.logo_url}" alt="Fastline Racing Academy" height="42" style="display:block;height:42px;width:auto;border:0">
+      <tr><td style="background:#ffffff;padding:28px 32px 10px" align="center">
+        <img src="${vars.logo_url}" alt="Fastline Racing Academy" width="190" style="display:block;width:190px;height:auto;border:0">
       </td></tr>
       <tr><td style="padding:32px 32px 20px">${paras}</td></tr>
       <tr><td style="padding:0 32px 28px">
@@ -418,7 +418,7 @@ async function processOne(lead: Record<string, any>) {
         const base = String(settings.booking_url_base ?? "https://leads.fastlineracingacademy.pl/calendar");
         const link = `${base}?t=${booking_token}`;
         const firstName = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
-        const vars = { link, imie: firstName, logo_url: "https://leads.fastlineracingacademy.pl/logo.webp" };
+        const vars = { link, imie: firstName, logo_url: "https://kltggicuonljcgyehcev.supabase.co/storage/v1/object/public/assets/logo-mail.png" };
         if (settings.client_email_enabled === true && tpl.send_email && email) {
           try {
             const from = `Fastline Racing Academy <${String(settings.email_from ?? "leads@fastlineracingacademy.pl")}>`;
