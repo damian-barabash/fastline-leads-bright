@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FUNCTIONS_URL } from "../config.js";
+import { IconPhone, IconClock, FlagPL } from "../components/Icons.jsx";
 import "./booking.css";
 
 // Publiczna strona /calendar?t=<token> — wybór terminu oddzwonienia.
@@ -162,9 +163,9 @@ export default function Booking() {
               <h1>{data.name ? `${data.name}, wybierz` : "Wybierz"} termin rozmowy</h1>
               <p>Oddzwonimy dokładnie wtedy, kiedy Ci pasuje.</p>
               <div className="bk-meta">
-                <span>📞 <b>Rozmowa telefoniczna</b></span>
-                <span>🕐 ok. 20 minut</span>
-                <span>🇵🇱 czas polski (pon–pt 10:00–18:00)</span>
+                <span><IconPhone /> <b>Rozmowa telefoniczna</b></span>
+                <span><IconClock /> ok. 20 minut</span>
+                <span><FlagPL /> czas polski (pon–pt 10:00–18:00)</span>
               </div>
             </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
+import { IconTrash } from "../components/Icons.jsx";
 
 export default function Users() {
   const [rows, setRows] = useState([]);
@@ -46,7 +47,7 @@ export default function Users() {
                   <div className="row" style={{ gap: 6 }}>
                     <button className="btn sm ghost" onClick={() => toggle(u)}>{u.active ? "Wyłącz" : "Włącz"}</button>
                     <button className="btn sm ghost" onClick={() => resetPw(u)}>Hasło</button>
-                    <button className="btn sm ghost" onClick={() => del(u)}>🗑</button>
+                    <button className="btn sm ghost" title="Usuń użytkownika" onClick={() => del(u)}><IconTrash /></button>
                   </div>
                 </td>
               </tr>

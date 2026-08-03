@@ -22,7 +22,12 @@ export default function DesktopOnly({ children }) {
   return (
     <div className="lock">
       <div>
-        <div className="padlock">🔒</div>
+        <div className="padlock">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--red-2, #ff3b47)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="9" rx="1" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+        </div>
         <h2>Dostęp tylko z komputera</h2>
         <p>
           Panel Fastline Leads Bright jest dostępny wyłącznie na komputerze lub laptopie.

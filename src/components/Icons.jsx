@@ -20,3 +20,30 @@ export function IconLock({ size = 12 }) {
     </svg>
   );
 }
+
+export function IconPhone({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A17 17 0 0 1 3 6a2 2 0 0 1 2-2" />
+    </svg>
+  );
+}
+
+export function IconClock({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+// mała flaga PL (emoji 🇵🇱 na Windows renderuje się jako litery "PL")
+export function FlagPL({ size = 14 }) {
+  return (
+    <svg width={size + 4} height={size} viewBox="0 0 18 14" aria-hidden="true" style={{ display: "inline-block" }}>
+      <rect x="0" y="0" width="18" height="7" fill="#f5f5f5" stroke="#c9c9c9" strokeWidth="0.5" />
+      <rect x="0" y="7" width="18" height="7" fill="#dc143c" />
+    </svg>
+  );
+}
