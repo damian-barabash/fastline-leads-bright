@@ -5,6 +5,7 @@ const NAV = [
   { to: "/", ico: "▚", label: "Pulpit", end: true },
   { to: "/leads", ico: "☰", label: "Leady" },
   { to: "/bookings", ico: "◷", label: "Rezerwacje" },
+  { to: "/analytics", ico: "◔", label: "Analityka" },
   { to: "/routing", ico: "⚙", label: "Sortowanie" },
   { to: "/messages", ico: "✉", label: "Wiadomości" },
   { to: "/facebook", ico: "◎", label: "Facebook" },

@@ -110,6 +110,43 @@ async function sendSms(token: string, from: string, phone: string, message: stri
   if (!res.ok || j.error) throw new Error(`smsapi: ${JSON.stringify(j)}`);
 }
 
+// ---- Ringostat (zakładka Analityka) ----
+const RS = "https://api.ringostat.net";
+// "YYYY-MM-DD" (dzień w Europe/Warsaw) -> ISO początku dnia
+function warsawDayStart(day: string): string {
+  const probe = new Date(`${day}T12:00:00Z`);
+  const off = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Warsaw", timeZoneName: "shortOffset" })
+    .formatToParts(probe).find((p) => p.type === "timeZoneName")?.value ?? "GMT+1";
+  const m = off.match(/GMT([+-])(\d+)/);
+  const h = m ? (m[1] === "-" ? -1 : 1) * Number(m[2]) : 1;
+  return new Date(new Date(`${day}T00:00:00Z`).getTime() - h * 3600_000).toISOString();
+}
+function rsRange(body: any) {
+  const today = new Date().toISOString().slice(0, 10);
+  const to = String(body.to || today);
+  const from = String(body.from || new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10));
+  const next = new Date(new Date(`${to}T12:00:00Z`).getTime() + 864e5).toISOString().slice(0, 10);
+  return { from, to, fromTs: warsawDayStart(from), toTs: warsawDayStart(next) };
+}
+const RS_LIST_COLS = "uniqueid,calldate,call_type,disposition,answered,client_phone,caller,dst,connected_with,n_alias,pool_name,scheme_name,duration,billsec,waittime,call_counter,proper_flag,repeated_flag,employee_fio,missing_reason,has_recording,recording,call_card,utm_source,utm_campaign,lead_id,ai_title,ai_summary,ai_score,ai_at";
+async function attachLeads(rows: any[]) {
+  const ids = [...new Set(rows.map((r) => r.lead_id).filter(Boolean))];
+  if (!ids.length) return rows;
+  const { data } = await db.from("leads").select("id,full_name,email,phone,campaign_name,form_name,page_name,pipedrive_lead_id,received_at").in("id", ids);
+  const byId = Object.fromEntries((data ?? []).map((l) => [l.id, l]));
+  return rows.map((r) => ({ ...r, lead: r.lead_id ? byId[r.lead_id] ?? null : null }));
+}
+async function runRsSync(secrets: Record<string, string>, payload: unknown = {}) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/ringostat-sync`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-internal-token": secrets.INTERNAL_TOKEN, "authorization": `Bearer ${SERVICE_ROLE}` },
+    body: JSON.stringify(payload),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.ok === false) throw new Error(j.error ?? `sync ${res.status}`);
+  return j;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method" }, 405);
@@ -232,6 +269,117 @@ Deno.serve(async (req: Request) => {
           leadsById = Object.fromEntries((ls ?? []).map((l) => [l.id, l]));
         }
         return json({ rows: (bks ?? []).map((b) => ({ ...b, lead: leadsById[b.lead_id] ?? null })) });
+      }
+
+      // ---- Ringostat: analityka rozmów (dostępne dla wszystkich ról) ----
+      case "rs.overview": {
+        const r = rsRange(body);
+        const { data: stats, error } = await db.rpc("rs_stats", { p_from: r.fromTs, p_to: r.toTs, p_employee: body.employee || null });
+        if (error) throw new Error(error.message);
+        const { data: st } = await db.from("settings").select("key,value").in("key", ["rs_last_sync_at", "rs_last_sync_result"]);
+        const s = Object.fromEntries((st ?? []).map((x) => [x.key, x.value]));
+        const { data: emps } = await db.from("rs_employees").select("staff_id,fio,extension,online").order("extension");
+        return json({ range: { from: r.from, to: r.to }, stats, employees: emps ?? [], lastSync: s.rs_last_sync_result ?? null });
+      }
+      case "rs.calls": {
+        const r = rsRange(body);
+        const limit = Math.min(Number(body.limit ?? 50), 500);
+        const offset = Number(body.offset ?? 0);
+        let q = db.from("rs_calls").select(RS_LIST_COLS, { count: "exact" })
+          .gte("calldate", r.fromTs).lt("calldate", r.toTs)
+          .order("calldate", { ascending: false }).range(offset, offset + limit - 1);
+        if (body.type === "in") q = q.in("call_type", ["in", "transitin"]);
+        if (body.type === "out") q = q.eq("call_type", "out");
+        if (body.type === "callback") q = q.eq("call_type", "callback");
+        if (body.status === "answered") q = q.eq("answered", true);
+        if (body.status === "missed") q = q.eq("answered", false);
+        if (body.employee) q = q.eq("employee_fio", body.employee);
+        if (body.onlyAi) q = q.not("ai_at", "is", null);
+        if (body.onlyLead) q = q.not("lead_id", "is", null);
+        if (body.onlyRecording) q = q.eq("has_recording", true);
+        if (body.minSec) q = q.gte("billsec", Number(body.minSec));
+        const qd = String(body.q ?? "").replace(/\D/g, "");
+        if (qd.length >= 3) q = q.like("client_phone", `%${qd.slice(-9)}%`);
+        else if (body.q) {
+          const t = String(body.q).replace(/[%,()]/g, " ");
+          q = q.or(`ai_summary.ilike.%${t}%,ai_title.ilike.%${t}%,employee_fio.ilike.%${t}%`);
+        }
+        const { data, count, error } = await q;
+        if (error) throw new Error(error.message);
+        return json({ rows: await attachLeads(data ?? []), total: count ?? 0 });
+      }
+      case "rs.call": {
+        const { data: c } = await db.from("rs_calls").select("*").eq("uniqueid", body.id).maybeSingle();
+        if (!c) throw new Error("Nie znaleziono rozmowy");
+        let history: any[] = [];
+        if (c.client_phone && c.client_phone.length >= 9) {
+          const { data } = await db.from("rs_calls").select(RS_LIST_COLS)
+            .eq("phone9", c.client_phone.slice(-9)).order("calldate", { ascending: false }).limit(100);
+          history = data ?? [];
+        }
+        const [withLead] = await attachLeads([c]);
+        delete (withLead as any).raw;
+        return json({ call: withLead, raw: c.raw, history });
+      }
+      case "rs.leadCalls": {
+        const { data: l } = await db.from("leads").select("id,phone").eq("id", body.lead_id).maybeSingle();
+        const p = String(l?.phone ?? "").replace(/\D/g, "");
+        let q = db.from("rs_calls").select(RS_LIST_COLS).order("calldate", { ascending: false }).limit(50);
+        q = p.length >= 9 ? q.or(`lead_id.eq.${body.lead_id},phone9.eq.${p.slice(-9)}`) : q.eq("lead_id", body.lead_id);
+        const { data } = await q;
+        return json({ rows: data ?? [] });
+      }
+      case "rs.missed": {
+        const r = rsRange(body);
+        const { data, error } = await db.rpc("rs_missed_open", { p_from: r.fromTs, p_to: r.toTs });
+        if (error) throw new Error(error.message);
+        const rows = (data ?? []).sort((a: any, b: any) => String(b.calldate).localeCompare(String(a.calldate)));
+        return json({ rows: await attachLeads(rows) });
+      }
+      case "rs.live": {
+        const h = { "Auth-key": secrets.RINGOSTAT_AUTH_KEY, "x-project-id": secrets.RINGOSTAT_PROJECT_ID };
+        const [online, speaking] = await Promise.all([
+          fetch(`${RS}/sipstatus/online`, { headers: h }).then((r) => r.json()).catch(() => []),
+          fetch(`${RS}/sipstatus/speaking`, { headers: h }).then((r) => r.json()).catch(() => []),
+        ]);
+        const on = new Set((Array.isArray(online) ? online : []).map(String));
+        const sp = new Set((Array.isArray(speaking) ? speaking : []).map((x: any) => String(typeof x === "object" ? (x.login ?? x.sip ?? JSON.stringify(x)) : x)));
+        const { data: emps } = await db.from("rs_employees").select("*").order("extension");
+        const today = warsawDayStart(new Date().toISOString().slice(0, 10));
+        const { data: todayCalls } = await db.from("rs_calls").select("employee_fio,billsec,call_type").gte("calldate", today).limit(1000);
+        return json({
+          at: new Date().toISOString(),
+          raw: { online, speaking },
+          employees: (emps ?? []).map((e) => {
+            const logins: string[] = e.sip_logins ?? [];
+            const mine = (todayCalls ?? []).filter((c) => c.employee_fio === e.fio);
+            return {
+              fio: e.fio, extension: e.extension, email: e.email,
+              online: logins.some((l) => on.has(l)),
+              speaking: logins.some((l) => sp.has(l) || [...sp].some((s) => s.includes(l))),
+              devices: logins.filter((l) => on.has(l)).map((l) => (l.endsWith("_rspmob") ? "aplikacja mobilna" : "Smart Phone / SIP")),
+              today: { calls: mine.length, talk: mine.reduce((a, c) => a + (c.billsec ?? 0), 0), out: mine.filter((c) => c.call_type === "out").length },
+            };
+          }),
+        });
+      }
+      case "rs.employees": {
+        const { data } = await db.from("rs_employees").select("staff_id,fio,extension,online").order("extension");
+        return json({ rows: data ?? [] });
+      }
+      case "rs.sync":
+        return json(await runRsSync(secrets));
+      case "rs.config": {
+        const { count: calls } = await db.from("rs_calls").select("*", { count: "exact", head: true });
+        const { count: ai } = await db.from("rs_calls").select("*", { count: "exact", head: true }).not("ai_at", "is", null);
+        const { data: events } = await db.from("rs_webhook_events").select("id,received_at,call_id,status,error").order("id", { ascending: false }).limit(10);
+        const { data: st } = await db.from("settings").select("value").eq("key", "rs_last_sync_result").maybeSingle();
+        return json({
+          projectId: secrets.RINGOSTAT_PROJECT_ID,
+          connected: !!secrets.RINGOSTAT_AUTH_KEY,
+          webhookUrl: isAdmin ? `${SUPABASE_URL}/functions/v1/ringostat-webhook?token=${secrets.RINGOSTAT_WEBHOOK_TOKEN}` : null,
+          calls: calls ?? 0, ai: ai ?? 0, events: events ?? [], lastSync: st?.value ?? null,
+        });
       }
 
       // ---- testowa wysyłka (Ustawienia) ----

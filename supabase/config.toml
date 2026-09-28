@@ -8,3 +8,12 @@ verify_jwt = false
 
 [functions.admin-api]
 verify_jwt = false
+
+[functions.booking]
+verify_jwt = false
+
+[functions.ringostat-sync]
+verify_jwt = false
+
+[functions.ringostat-webhook]
+verify_jwt = false

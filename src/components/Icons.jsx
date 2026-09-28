@@ -47,3 +47,52 @@ export function FlagPL({ size = 14 }) {
     </svg>
   );
 }
+
+export function IconPlay({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M7 5l12 7-12 7z" fill="currentColor" />
+    </svg>
+  );
+}
+
+// strzałka rozmowy: przychodząca (do nas) / wychodząca (od nas)
+export function IconCallIn({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M18 6L6 18" /><path d="M15 18H6V9" />
+    </svg>
+  );
+}
+export function IconCallOut({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M6 18L18 6" /><path d="M9 6h9v9" />
+    </svg>
+  );
+}
+
+export function IconSpark({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
+      <path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" />
+    </svg>
+  );
+}
+
+export function IconExternal({ size = 12 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+    </svg>
+  );
+}
+
+export function IconDownload({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" {...base} aria-hidden="true">
+      <path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" />
+    </svg>
+  );
+}

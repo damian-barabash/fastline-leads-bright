@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api.js";
+import LeadCalls from "./analytics/LeadCalls.jsx";
 
 const STATUSES = ["all", "done", "pending", "failed", "skipped"];
 const fmt = (t) => (t ? new Date(t).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -112,6 +113,7 @@ export default function Leads() {
               </div>
             )}
             {open.last_error && <div className="err small" style={{ marginBottom: 12 }}>{open.last_error}</div>}
+            <LeadCalls leadId={open.id} />
             <h3>Odpowiedzi z formularza</h3>
             <table className="tbl">
               <tbody>
