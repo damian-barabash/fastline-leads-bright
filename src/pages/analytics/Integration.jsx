@@ -52,6 +52,17 @@ export default function Integration({ onSynced }) {
       load(); onSynced?.();
     } catch (e) { setMsg({ err: e.message }); } finally { setBusy(false); }
   };
+  const [importText, setImportText] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+  const doImport = async () => {
+    setImporting(true); setImportMsg(null);
+    try {
+      const r = await api("rs.importAi", { text: importText });
+      setImportMsg({ ok: `Zaimportowano analizę rozmowy ${r.call_id} — widoczna w karcie rozmowy.` });
+      setImportText(""); load();
+    } catch (e) { setImportMsg({ err: e.message }); } finally { setImporting(false); }
+  };
   const copy = async () => {
     try { await navigator.clipboard.writeText(d.webhookUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* brak dostępu do schowka */ }
   };
@@ -116,6 +127,18 @@ export default function Integration({ onSynced }) {
         ) : (
           <div className="small muted">Konfigurację webhooka widzi administrator.</div>
         )}
+
+        <h3 style={{ marginTop: 20 }}>Ręczny import analizy AI</h3>
+        <div className="small muted" style={{ marginBottom: 8, lineHeight: 1.6 }}>
+          Gdy webhook nie dotarł: Ringostat → Integracje → „Sprawdź działania z błędami” → <b>„Pokaż”</b> → skopiuj cały tekst i wklej tutaj.
+        </div>
+        <textarea rows={5} value={importText} onChange={(e) => setImportText(e.target.value)}
+          placeholder='{ "call_id": "pl2_-…", "summary": "…", … }' style={{ fontFamily: "monospace", fontSize: 12 }} />
+        <button className="btn sm" style={{ marginTop: 8 }} onClick={doImport} disabled={importing || !importText.trim()}>
+          {importing ? <span className="spin" /> : null} Importuj
+        </button>
+        {importMsg?.ok && <div className="ok" style={{ marginTop: 10 }}>{importMsg.ok}</div>}
+        {importMsg?.err && <div className="err" style={{ marginTop: 10 }}>{importMsg.err}</div>}
 
         <h3 style={{ marginTop: 20 }}>Ostatnie zdarzenia webhooka</h3>
         <table className="tbl">

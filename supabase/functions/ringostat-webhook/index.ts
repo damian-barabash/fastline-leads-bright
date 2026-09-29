@@ -88,6 +88,11 @@ Deno.serve(async (req) => {
   const secrets = Object.fromEntries((sec ?? []).map((r) => [r.key, r.value]));
   const token = url.searchParams.get("token") ?? req.headers.get("x-webhook-token") ?? "";
   if (!secrets.RINGOSTAT_WEBHOOK_TOKEN || token !== secrets.RINGOSTAT_WEBHOOK_TOKEN) {
+    // ślad nieudanej próby (bez treści) — ułatwia diagnozę złego URL w konfiguracji Ringostat
+    await db.from("rs_webhook_events").insert({
+      status: "unauthorized", error: token ? "zły token" : "brak tokenu w URL",
+      payload: { path: url.pathname, ua: req.headers.get("user-agent") },
+    });
     return new Response("unauthorized", { status: 401 });
   }
 

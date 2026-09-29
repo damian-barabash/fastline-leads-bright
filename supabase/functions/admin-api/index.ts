@@ -363,6 +363,22 @@ Deno.serve(async (req: Request) => {
           }),
         });
       }
+      // ręczny import wyniku AI (tekst z „Pokaż” w Ringostat) — przez ten sam odbiornik co webhook
+      case "rs.importAi": {
+        const raw = String(body.text ?? "").trim();
+        // Ringostat pokazuje czasem „POST adres\n{json}” — bierzemy sam JSON
+        const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
+        if (start < 0 || end <= start) throw new Error("Nie znaleziono danych JSON — wklej cały tekst z „Pokaż”");
+        let parsed: any;
+        try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { throw new Error("Niepoprawny JSON — skopiuj cały tekst z „Pokaż”"); }
+        if (!parsed.call_id) throw new Error("Brak call_id w danych");
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/ringostat-webhook?token=${secrets.RINGOSTAT_WEBHOOK_TOKEN}`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(parsed),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok) throw new Error(j.error ?? `import ${res.status}`);
+        return json({ ok: true, call_id: parsed.call_id, ai: j.ai });
+      }
       case "rs.employees": {
         const { data } = await db.from("rs_employees").select("staff_id,fio,extension,online").order("extension");
         return json({ rows: data ?? [] });
