@@ -10,6 +10,7 @@ const blank = () => ({
   to_crm: true, to_email: false, email_recipients: [], email_cc: [], pd_owner_id: null, pd_label_ids: [],
   pd_source_option_id: 26, pd_campaign_from_fb: true, pd_campaign_static: "",
   pd_visibility: "all",
+  client_copy_on: false, client_copy_emails: [],
 });
 
 // derive matchType for editing an existing rule
@@ -83,8 +84,10 @@ export default function Routing() {
         pd_visibility: e.pd_visibility === "owner" ? "owner" : "all",
         client_template_id: e.client_template_id || null,
         client_msg_off: !!e.client_msg_off,
+        client_copy_on: !!e.client_copy_on, client_copy_emails: e.client_copy_emails || [],
         match_form_id: null, match_page_id: null, match_name_pattern: null,
       };
+      if (rule.client_copy_on && !rule.client_copy_emails.length) throw new Error("Wpisz adres e-mail, na który ma trafiać kopia wiadomości do klienta");
       if (!e.is_default) {
         if (e.matchType === "form") rule.match_form_id = e.match_form_id || null;
         if (e.matchType === "pattern") rule.match_name_pattern = e.match_name_pattern || null;
@@ -163,7 +166,7 @@ export default function Routing() {
             <tbody>
               {rules.sort((a, b) => a.priority - b.priority).map((r) => (
                 <tr key={r.id} style={{ opacity: r.enabled ? 1 : 0.5 }}>
-                  <td><b>{r.name}</b>{r.is_default && <span className="badge skipped" style={{ marginLeft: 6 }}>domyślna</span>}{r.pd_visibility === "owner" && <span className="badge" style={{ marginLeft: 6, gap: 4 }} title="Widoczny tylko dla właściciela + administratorów"><IconLock /> właściciel</span>}</td>
+                  <td><b>{r.name}</b>{r.is_default && <span className="badge skipped" style={{ marginLeft: 6 }}>domyślna</span>}{r.pd_visibility === "owner" && <span className="badge" style={{ marginLeft: 6, gap: 4 }} title="Widoczny tylko dla właściciela + administratorów"><IconLock /> właściciel</span>}{r.client_copy_on && <span className="badge" style={{ marginLeft: 6 }} title={"Kopia wiadomości do klienta i rezerwacji: " + (r.client_copy_emails || []).join(", ")}>kopia</span>}</td>
                   <td className="small">{r.is_default ? "wszystkie" : r.match_form_id ? "formularz" : r.match_name_pattern ? `nazwa ~ „${r.match_name_pattern}”` : r.match_page_id ? `strona ${pageName(r.match_page_id)}` : "—"}</td>
                   <td className="small">{r.pd_owner_id ? ownerName(r.pd_owner_id) : "—"}</td>
                   <td className="small">{(r.pd_label_ids || []).map(labelName).join(", ") || "—"}</td>
@@ -270,6 +273,18 @@ export default function Routing() {
                 <option value="off">Nie wysyłaj wiadomości</option>
                 {templates.map((t) => <option key={t.id} value={t.id}>Zawsze: {t.name}</option>)}
               </select></label>
+
+            <div className="fld" style={{ marginBottom: 14 }}>
+              <label className="toggle"><input type="checkbox" checked={!!edit.client_copy_on} onChange={(e) => setEdit({ ...edit, client_copy_on: e.target.checked })} /><span className="track" />Kopia wiadomości do klienta + powiadomienie o rezerwacji terminu</label>
+              {edit.client_copy_on && (
+                <label className="fld" style={{ marginTop: 10, marginBottom: 0 }}><span className="lbl">Adresy e-mail (oddziel przecinkiem)</span>
+                  <input placeholder="np. mariusz.miekos@greywolfgroup.pl" value={(edit.client_copy_emails || []).join(", ")} onChange={(e) => setEdit({ ...edit, client_copy_emails: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
+                  <span className="muted small" style={{ display: "block", marginTop: 6 }}>
+                    Te adresy dostaną w kopii (CC) e-mail wysyłany do klienta z linkiem do kalendarza oraz osobną wiadomość, gdy klient wybierze lub zmieni termin rozmowy.
+                  </span>
+                </label>
+              )}
+            </div>
 
             <label className="fld"><span className="lbl">Priorytet (niższy = ważniejszy)</span>
               <input type="number" value={edit.priority} onChange={(e) => setEdit({ ...edit, priority: e.target.value })} /></label>

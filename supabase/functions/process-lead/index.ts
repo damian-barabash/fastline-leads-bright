@@ -422,7 +422,11 @@ async function processOne(lead: Record<string, any>) {
         if (settings.client_email_enabled === true && tpl.send_email && email) {
           try {
             const from = `Fastline Racing Academy <${String(settings.email_from ?? "leads@fastlineracingacademy.pl")}>`;
-            await sendEmail(secrets.RESEND_KEY, from, [email], [], renderText(tpl.email_subject, vars), brandedEmailHtml(tpl.email_body, vars));
+            // kopia do opiekuna (ustawienie reguły) — bez adresu samego klienta
+            const copy: string[] = rule.client_copy_on
+              ? (rule.client_copy_emails ?? []).filter((a: string) => EMAIL_RE.test(a) && a.toLowerCase() !== email.trim().toLowerCase())
+              : [];
+            await sendEmail(secrets.RESEND_KEY, from, [email], copy, renderText(tpl.email_subject, vars), brandedEmailHtml(tpl.email_body, vars));
             client_email_status = "sent";
           } catch (e) { client_email_status = "failed"; errors.push("client_email: " + String(e)); }
         }

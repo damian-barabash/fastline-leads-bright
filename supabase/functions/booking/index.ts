@@ -162,6 +162,36 @@ async function pdNotify(secrets: Record<string, string>, settings: Record<string
   return { activityId, noteId };
 }
 
+// ---- e-mail do opiekuna: klient zarezerwował / zmienił termin ----
+// Tylko gdy reguła leada ma włączoną kopię (routing_rules.client_copy_on).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+async function notifyCopy(secrets: Record<string, string>, settings: Record<string, unknown>, lead: any, slotIso: string, cfg: Cfg, isChange: boolean) {
+  if (!lead.matched_rule_id || !secrets.RESEND_KEY) return;
+  const { data: rule } = await db.from("routing_rules").select("client_copy_on,client_copy_emails").eq("id", lead.matched_rule_id).maybeSingle();
+  const to: string[] = rule?.client_copy_on ? (rule.client_copy_emails ?? []).filter((a: string) => EMAIL_RE.test(a)) : [];
+  if (!to.length) return;
+
+  const when = plDateTime(slotIso, cfg.tz);
+  const who = lead.full_name || lead.email || lead.phone || "Klient";
+  const domain = String(settings.pipedrive_company_domain ?? "fastlineracingacademy");
+  const row = (k: string, v: unknown) => v ? `<tr><td style="padding:4px 10px;color:#888">${k}</td><td style="padding:4px 10px"><b>${esc(v)}</b></td></tr>` : "";
+  const html = `<div style="font-family:Arial,sans-serif"><h2 style="color:#e11d2a">${isChange ? "Klient zmienił termin rozmowy" : "Klient wybrał termin rozmowy"}</h2>
+    <p style="font-size:17px;margin:0 0 14px">${esc(who)} — <b>${esc(when)}</b> (czas PL, ok. ${cfg.step_min} min)</p>
+    <table style="border-collapse:collapse">${row("Imię i nazwisko", lead.full_name)}${row("E-mail", lead.email)}${row("Telefon", lead.phone)}${row("Kampania", lead.campaign_name)}${row("Formularz", lead.form_name)}</table>
+    ${lead.pipedrive_lead_id ? `<p style="margin-top:14px"><a href="https://${esc(domain)}.pipedrive.com/leads/inbox/${esc(lead.pipedrive_lead_id)}" style="color:#e11d2a;font-weight:700">Otwórz leada w Pipedrive ›</a></p>` : ""}
+    <p style="color:#aaa;font-size:12px;margin-top:16px">FASTLINE LEADS BRIGHT</p></div>`;
+  const from = `Fastline Racing Academy <${String(settings.email_from ?? "leads@fastlineracingacademy.pl")}>`;
+  const subject = `${isChange ? "Zmiana terminu rozmowy" : "Termin rozmowy"}: ${who} — ${when}`;
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "authorization": `Bearer ${secrets.RESEND_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({ from, to, subject, html }),
+  });
+  if (!res.ok) throw new Error(`resend failed: ${res.status} ${await res.text()}`);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method" }, 405);
@@ -181,7 +211,7 @@ Deno.serve(async (req: Request) => {
     const isDemo = token === "demo";
     let lead: any = null;
     if (!isDemo) {
-      const { data } = await db.from("leads").select("id,full_name,email,phone,matched_rule_id,pipedrive_lead_id,pipedrive_person_id").eq("booking_token", token).maybeSingle();
+      const { data } = await db.from("leads").select("id,full_name,email,phone,campaign_name,form_name,matched_rule_id,pipedrive_lead_id,pipedrive_person_id").eq("booking_token", token).maybeSingle();
       if (!data) return json({ error: "invalid_link" }, 404);
       lead = data;
     }
@@ -240,6 +270,9 @@ Deno.serve(async (req: Request) => {
       if (activityId || noteId) {
         await db.from("callback_bookings").update({ pd_activity_id: activityId, pd_note_id: noteId, updated_at: new Date().toISOString() }).eq("id", ins.id);
       }
+      // powiadomienie opiekuna nie może zepsuć rezerwacji klienta
+      try { await notifyCopy(secrets, settings, lead, slot, cfg, !!existing); }
+      catch (e) { console.error("booking copy mail failed", e); }
       return json({ ok: true, slot, label: plDateTime(slot, cfg.tz), changed: !!existing });
     }
 
