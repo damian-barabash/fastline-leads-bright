@@ -7,7 +7,7 @@ import {
 
 // Przegląd — raport rozmów Ringostat w wybranym okresie.
 
-function DailyChart({ days }) {
+export function DailyChart({ days }) {
   const max = Math.max(1, ...days.map((d) => d.in + d.out));
   return (
     <>

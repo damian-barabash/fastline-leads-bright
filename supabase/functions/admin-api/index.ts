@@ -147,6 +147,375 @@ async function runRsSync(secrets: Record<string, string>, payload: unknown = {})
   return j;
 }
 
+// ---- Raport tygodniowy: rozmowy Ringostat + komentarze handlowców z Pipedrive ----
+const PD_DOMAIN = "fastlineracingacademy";
+const addDays = (day: string, n: number) => new Date(new Date(`${day}T12:00:00Z`).getTime() + n * 864e5).toISOString().slice(0, 10);
+function mondayOf(day: string) {
+  const d = new Date(`${day}T12:00:00Z`);
+  return addDays(day, -((d.getUTCDay() + 6) % 7));
+}
+const warsawDay = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw" }).format(new Date(iso));
+// Pipedrive zwraca czasy UTC w formacie "YYYY-MM-DD HH:MM:SS"
+const pdTime = (t: string | null | undefined) => (t ? new Date(String(t).replace(" ", "T") + "Z").toISOString() : null);
+
+async function pdAll(token: string, path: string, max = 3000) {
+  const out: any[] = [];
+  let start = 0;
+  while (out.length < max) {
+    const j = await pdGet(token, `${path}${path.includes("?") ? "&" : "?"}start=${start}&limit=500`);
+    if (!j?.success) throw new Error(`Pipedrive: ${j?.error ?? "błąd"}`);
+    out.push(...(j.data ?? []));
+    const p = j.additional_data?.pagination;
+    if (!p?.more_items_in_collection) break;
+    start = p.next_start;
+  }
+  return out;
+}
+
+const decodeEntities = (s: string) => s
+  .replace(/&nbsp;/g, " ").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+function htmlToText(html: string) {
+  return decodeEntities(String(html ?? "")
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(div|p|li|h\d)>/gi, "\n").replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, ""))
+    .replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// notatka Ringostat AI wrzucana do Pipedrive: <b>Etykieta</b></div><div>wartość</div> … + link do karty połączenia
+const AI_NOTE_FIELDS: Record<string, string> = {
+  "podsumowanie": "summary",
+  "nastrój menedżera": "employee_mood",
+  "nastrój klienta": "client_mood",
+  "analiza nastroju": "sentiment",
+  "czy należy zwrócić uwagę na rozmowę: ocena": "review_score",
+  "czy należy zwrócić uwagę na rozmowę: szczegóły": "review_details",
+};
+function parseAiNote(html: string) {
+  const uid = String(html).match(/uniqueId=([^"&<\s]+)/)?.[1];
+  if (!uid || !/<b>\s*Podsumowanie\s*<\/b>/i.test(html)) return null;
+  const ai: Record<string, unknown> = {};
+  const custom: Record<string, string> = {};
+  const re = /<b>([^<]+)<\/b>\s*<\/div>\s*<div>([\s\S]*?)<\/div>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const label = decodeEntities(m[1]).trim();
+    const val = htmlToText(m[2]);
+    if (!val || /^karta połączenia$/i.test(label)) continue;
+    const key = AI_NOTE_FIELDS[label.toLowerCase()];
+    if (key) ai[key] = key === "review_score" ? Number(val.replace(",", ".")) || val : val;
+    else custom[label] = val;
+  }
+  if (Object.keys(custom).length) ai.custom = custom;
+  return { uniqueid: decodeURIComponent(uid), ai };
+}
+const NEGATIVE_MOOD = /rozczarow|zirytow|zdenerw|niezadow|sfrustr|wściek|agresyw|zły|zła|wrog|negatyw|roszczeni|nieprzyjem/i;
+// "zainteresowana" → "zainteresowany" (zliczanie nastrojów bez podziału na rodzaj)
+const moodKey = (s: string) => String(s ?? "").toLowerCase().trim().split(/[,;/]/)[0].trim().replace(/(n|t|ł|w|c)a$/, "$1y");
+
+async function weeklyReport(secrets: Record<string, string>, weekIn?: string) {
+  const today = warsawDay(new Date().toISOString());
+  const from = mondayOf(String(weekIn || addDays(mondayOf(today), -7)).slice(0, 10));
+  const to = addDays(from, 6);
+  const prevFrom = addDays(from, -7);
+  const fromTs = warsawDayStart(from), toTs = warsawDayStart(addDays(to, 1)), prevFromTs = warsawDayStart(prevFrom);
+  const nextFrom = addDays(to, 1), nextTo = addDays(to, 7);
+  const T = secrets.PIPEDRIVE_TOKEN;
+
+  // --- dane równolegle: Ringostat (SQL) + Pipedrive (notatki, aktywności, użytkownicy) ---
+  const [statsR, prevR, leadsR, emps, users, notesRaw, acts, nextActs] = await Promise.all([
+    db.rpc("rs_stats", { p_from: fromTs, p_to: toTs, p_employee: null }),
+    db.rpc("rs_stats", { p_from: prevFromTs, p_to: fromTs, p_employee: null }),
+    db.rpc("rs_week_leads", { p_from: fromTs, p_to: toTs }),
+    db.from("rs_employees").select("fio,email"),
+    pdGet(T, "/users").then((j) => j?.data ?? []),
+    pdAll(T, `/notes?start_date=${addDays(from, -1)}&end_date=${to}&sort=add_time%20ASC`),
+    pdAll(T, `/activities?user_id=0&start_date=${from}&end_date=${to}`),
+    pdAll(T, `/activities?user_id=0&done=0&start_date=${nextFrom}&end_date=${nextTo}`),
+  ]);
+  if (statsR.error) throw new Error(statsR.error.message);
+  if (prevR.error) throw new Error(prevR.error.message);
+  if (leadsR.error) throw new Error(leadsR.error.message);
+  const stats = statsR.data, prev = prevR.data, leadFunnel = leadsR.data;
+
+  const inWeek = (iso: string | null) => !!iso && iso >= fromTs && iso < toTs;
+  const notes = notesRaw.filter((n) => inWeek(pdTime(n.add_time)));
+
+  // --- rozmowy tygodnia (do przypięcia AI i statystyk per klient) ---
+  const weekCalls: any[] = [];
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await db.from("rs_calls")
+      .select("uniqueid,calldate,call_type,answered,billsec,employee_fio,client_phone,lead_id,recording,ai_at,ai_summary,ai")
+      .gte("calldate", fromTs).lt("calldate", toTs).order("calldate").range(off, off + 999);
+    if (error) throw new Error(error.message);
+    weekCalls.push(...(data ?? []));
+    if ((data ?? []).length < 1000) break;
+  }
+
+  // --- notatki: AI z Ringostat / systemowe (rezerwacje) / komentarze handlowców ---
+  const aiNotes: any[] = [];
+  const humanNotes: any[] = [];
+  let bookingNotes = 0;
+  const seenAi = new Set<string>();
+  for (const n of notes) {
+    const html = String(n.content ?? "");
+    const ai = parseAiNote(html);
+    if (ai) {
+      if (seenAi.has(ai.uniqueid)) continue; // ta sama notatka bywa przypięta do leada i do deala
+      seenAi.add(ai.uniqueid);
+      aiNotes.push({ ...ai, note: n });
+    } else if (/strona rezerwacji/i.test(html)) bookingNotes++;
+    else humanNotes.push(n);
+  }
+
+  // wyniki AI z notatek → rs_calls (tylko gdy rozmowa nie ma jeszcze wyników z webhooka)
+  const callByUid = new Map<string, any>();
+  const uids = aiNotes.map((a) => a.uniqueid);
+  for (let i = 0; i < uids.length; i += 200) {
+    const { data } = await db.from("rs_calls")
+      .select("uniqueid,calldate,call_type,answered,billsec,employee_fio,client_phone,lead_id,recording,ai_at")
+      .in("uniqueid", uids.slice(i, i + 200));
+    for (const c of data ?? []) callByUid.set(c.uniqueid, c);
+  }
+  const toApply = aiNotes.filter((a) => callByUid.get(a.uniqueid) && !callByUid.get(a.uniqueid).ai_at);
+  for (let i = 0; i < toApply.length; i += 20) {
+    await Promise.all(toApply.slice(i, i + 20).map((a) =>
+      db.from("rs_calls").update({
+        ai: { ...a.ai, source: "pipedrive" },
+        ai_summary: a.ai.summary ? String(a.ai.summary) : null,
+        ai_at: pdTime(a.note.add_time),
+      }).eq("uniqueid", a.uniqueid).is("ai_at", null)));
+  }
+
+  // --- tożsamość handlowców: e-mail łączy Ringostat (fio) i Pipedrive (user) ---
+  const pdUsers = new Map<number, any>((users as any[]).map((u) => [u.id, u]));
+  const emailByFio = new Map<string, string>((emps.data ?? []).map((e: any) => [e.fio, String(e.email ?? "").toLowerCase()]));
+  const fioByEmail = new Map<string, string>([...emailByFio].map(([f, e]) => [e, f]));
+  const pdUserByEmail = new Map<string, any>((users as any[]).map((u) => [String(u.email ?? "").toLowerCase(), u]));
+  const personName = (fio?: string | null, pdUserId?: number | null) => {
+    if (fio) return fio;
+    const u = pdUserId ? pdUsers.get(pdUserId) : null;
+    if (!u) return "(nieznany)";
+    return fioByEmail.get(String(u.email ?? "").toLowerCase()) ?? u.name;
+  };
+  const keyOfFio = (fio: string) => emailByFio.get(fio) || `fio:${fio}`;
+  const keyOfPd = (id: number) => String(pdUsers.get(id)?.email ?? "").toLowerCase() || `pd:${id}`;
+
+  // --- nasze leady (kampania/formularz) po id leada / osoby w Pipedrive ---
+  const pdLeadIds = new Set<string>(), pdPersonIds = new Set<number>();
+  for (const n of notes) { if (n.lead_id) pdLeadIds.add(n.lead_id); if (n.person_id) pdPersonIds.add(n.person_id); }
+  for (const a of acts) { if (a.lead_id) pdLeadIds.add(a.lead_id); if (a.person_id) pdPersonIds.add(a.person_id); }
+  const ourLeads: any[] = [];
+  const LEAD_COLS = "id,full_name,phone,email,campaign_name,form_name,received_at,pipedrive_lead_id,pipedrive_person_id";
+  const ids = [...pdLeadIds];
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data } = await db.from("leads").select(LEAD_COLS).in("pipedrive_lead_id", ids.slice(i, i + 150));
+    ourLeads.push(...(data ?? []));
+  }
+  const pids = [...pdPersonIds];
+  for (let i = 0; i < pids.length; i += 150) {
+    const { data } = await db.from("leads").select(LEAD_COLS).in("pipedrive_person_id", pids.slice(i, i + 150));
+    ourLeads.push(...(data ?? []));
+  }
+  const ourByPdLead = new Map(ourLeads.filter((l) => l.pipedrive_lead_id).map((l) => [l.pipedrive_lead_id, l]));
+  const ourByPerson = new Map(ourLeads.filter((l) => l.pipedrive_person_id).map((l) => [Number(l.pipedrive_person_id), l]));
+  const ourById = new Map(ourLeads.map((l) => [l.id, l]));
+  // brakujące leady z rozmów (rs_calls.lead_id)
+  const missingIds = [...new Set(weekCalls.map((c) => c.lead_id).concat([...callByUid.values()].map((c) => c.lead_id)).filter((x) => x && !ourById.has(x)))];
+  for (let i = 0; i < missingIds.length; i += 150) {
+    const { data } = await db.from("leads").select(LEAD_COLS).in("id", missingIds.slice(i, i + 150));
+    for (const l of data ?? []) { ourById.set(l.id, l); if (l.pipedrive_lead_id && !ourByPdLead.has(l.pipedrive_lead_id)) ourByPdLead.set(l.pipedrive_lead_id, l); }
+  }
+
+  // --- klienci: oś czasu tygodnia (komentarze + AI) ---
+  const clients = new Map<string, any>();
+  const clientFor = (o: { lead_id?: string | null; deal_id?: number | null; person_id?: number | null; name?: string | null; org?: string | null; ourLead?: any }) => {
+    const our = o.ourLead ?? (o.lead_id ? ourByPdLead.get(o.lead_id) : null) ?? (o.person_id ? ourByPerson.get(Number(o.person_id)) : null) ?? null;
+    const pdLead = o.lead_id ?? our?.pipedrive_lead_id ?? null;
+    const key = pdLead ? `L:${pdLead}` : o.deal_id ? `D:${o.deal_id}` : o.person_id ? `P:${o.person_id}` : our ? `O:${our.id}` : null;
+    if (!key) return null;
+    let c = clients.get(key);
+    if (!c) {
+      c = {
+        key, name: o.name || our?.full_name || "(bez nazwy)", org: o.org ?? null,
+        pdUrl: pdLead ? `https://${PD_DOMAIN}.pipedrive.com/leads/inbox/${pdLead}`
+          : o.deal_id ? `https://${PD_DOMAIN}.pipedrive.com/deal/${o.deal_id}`
+          : o.person_id ? `https://${PD_DOMAIN}.pipedrive.com/person/${o.person_id}` : null,
+        lead: our ? { id: our.id, campaign: our.campaign_name || our.form_name, received_at: our.received_at, phone: our.phone } : null,
+        entries: [], people: new Set<string>(), calls: 0, talk: 0, last: "",
+      };
+      clients.set(key, c);
+    }
+    if (!c.lead && our) c.lead = { id: our.id, campaign: our.campaign_name || our.form_name, received_at: our.received_at, phone: our.phone };
+    if (!c.org && o.org) c.org = o.org;
+    if (c.name === "(bez nazwy)" && o.name) c.name = o.name;
+    return c;
+  };
+  const push = (c: any, e: any) => {
+    if (!c) return;
+    c.entries.push(e);
+    c.people.add(e.author);
+    if (e.at > c.last) c.last = e.at;
+  };
+
+  // komentarze z notatek (ręczne) — bez duplikatów (ta sama treść przypięta do kilku obiektów)
+  const seenText = new Set<string>();
+  const comments: any[] = [];
+  for (const n of humanNotes) {
+    const text = htmlToText(n.content);
+    if (!text) continue;
+    const at = pdTime(n.add_time)!;
+    const sig = `${n.user_id}|${text}|${at.slice(0, 16)}`;
+    if (seenText.has(sig)) continue;
+    seenText.add(sig);
+    const e = { id: `n${n.id}`, kind: "note", at, author: personName(null, n.user_id), authorKey: keyOfPd(n.user_id), text };
+    comments.push(e);
+    push(clientFor({ lead_id: n.lead_id, deal_id: n.deal_id, person_id: n.person_id, name: n.person?.name ?? n.lead?.title ?? n.deal?.title, org: n.organization?.name }), e);
+  }
+  // komentarze z aktywności (notatka do telefonu / maila)
+  const ACT_TYPE: Record<string, string> = { call: "Telefon", email: "E-mail", meeting: "Spotkanie", task: "Zadanie", deadline: "Termin", lunch: "Spotkanie" };
+  for (const a of acts) {
+    const text = htmlToText(a.note ?? "");
+    if (!text) continue;
+    // czas wykonania, jeśli mieści się w tygodniu; inaczej termin aktywności
+    const doneAt = pdTime(a.marked_as_done_time);
+    const at = inWeek(doneAt) ? doneAt! : pdTime(`${a.due_date} ${a.due_time && a.due_time !== "00:00" ? a.due_time : "10:00"}:00`)!;
+    const e = {
+      id: `a${a.id}`, kind: "activity", at, author: personName(null, a.user_id), authorKey: keyOfPd(a.user_id), text,
+      subject: a.subject, actType: ACT_TYPE[a.type] ?? a.type, done: !!a.done, due: a.due_date,
+    };
+    comments.push(e);
+    push(clientFor({ lead_id: a.lead_id, deal_id: a.deal_id, person_id: a.person_id, name: a.person_name ?? a.lead_title ?? a.deal_title, org: a.org_name }), e);
+  }
+
+  // podsumowania AI (z Pipedrive + wcześniejsze z webhooka dla rozmów tygodnia)
+  const aiItems: any[] = [];
+  const aiFromNote = new Map(aiNotes.map((a) => [a.uniqueid, a]));
+  const aiUids = new Set<string>([...aiNotes.map((a) => a.uniqueid), ...weekCalls.filter((c) => c.ai_at).map((c) => c.uniqueid)]);
+  const weekCallByUid = new Map(weekCalls.map((c) => [c.uniqueid, c]));
+  for (const uid of aiUids) {
+    const note = aiFromNote.get(uid);
+    const call = weekCallByUid.get(uid) ?? callByUid.get(uid) ?? null;
+    const ai: any = note?.ai ?? call?.ai ?? {};
+    const summary = String(ai.summary ?? call?.ai_summary ?? "").trim();
+    if (!summary) continue;
+    const fio = call?.employee_fio ?? null;
+    const e = {
+      id: `ai:${uid}`, kind: "ai", uniqueid: uid,
+      at: call?.calldate ? new Date(call.calldate).toISOString() : pdTime(note?.note?.add_time),
+      author: fio ?? "Ringostat AI", authorKey: fio ? keyOfFio(fio) : "ai",
+      text: summary, clientMood: ai.client_mood ?? null, employeeMood: ai.employee_mood ?? null,
+      sentiment: ai.sentiment ?? null, reviewScore: typeof ai.review_score === "number" ? ai.review_score : (Number(ai.review_score) || null),
+      billsec: call?.billsec ?? null, callType: call?.call_type ?? null, hasRecording: !!call?.recording,
+    };
+    aiItems.push(e);
+    const n = note?.note;
+    const our = call?.lead_id ? ourById.get(call.lead_id) : null;
+    push(clientFor(n
+      ? { lead_id: n.lead_id, deal_id: n.deal_id, person_id: n.person_id, name: n.person?.name ?? n.lead?.title, org: n.organization?.name, ourLead: n.lead_id ? undefined : our }
+      : { ourLead: our, name: our?.full_name }), e);
+  }
+
+  // rozmowy tygodnia per klient
+  for (const c of weekCalls) {
+    const our = c.lead_id ? ourById.get(c.lead_id) : null;
+    const key = our?.pipedrive_lead_id ? `L:${our.pipedrive_lead_id}` : our ? `O:${our.id}` : null;
+    const cl = key ? clients.get(key) : null;
+    if (cl) { cl.calls++; cl.talk += c.answered ? (c.billsec ?? 0) : 0; }
+  }
+
+  const clientList = [...clients.values()]
+    .filter((c) => c.entries.length)
+    .map((c) => ({ ...c, people: [...c.people], entries: c.entries.sort((a: any, b: any) => String(a.at).localeCompare(String(b.at))) }))
+    .sort((a, b) => String(b.last).localeCompare(String(a.last)));
+
+  // --- handlowcy: Ringostat + Pipedrive w jednym wierszu ---
+  const people = new Map<string, any>();
+  const P = (key: string, name: string) => {
+    if (!people.has(key)) people.set(key, {
+      key, name, calls: 0, out: 0, outAnswered: 0, in: 0, answered: 0, talk: 0, avgTalk: 0, clients: 0, leads: 0,
+      prevCalls: 0, prevTalk: 0, notes: 0, actsDone: 0, actsOpen: 0, comments: 0, nextWeek: 0, ai: 0, aiReview: [] as number[], moods: {} as Record<string, number>,
+    });
+    return people.get(key);
+  };
+  for (const e of stats?.byEmployee ?? []) {
+    if (e.name === "(bez pracownika)") continue;
+    Object.assign(P(keyOfFio(e.name), e.name), {
+      calls: e.calls, out: e.out, outAnswered: e.out_answered, in: e.in, answered: e.answered, talk: e.talk, avgTalk: e.avg_talk, clients: e.clients, leads: e.leads,
+    });
+  }
+  for (const e of prev?.byEmployee ?? []) {
+    if (e.name === "(bez pracownika)") continue;
+    const p = P(keyOfFio(e.name), e.name);
+    p.prevCalls = e.calls; p.prevTalk = e.talk;
+  }
+  for (const n of humanNotes) P(keyOfPd(n.user_id), personName(null, n.user_id)).notes++;
+  for (const a of acts) {
+    const p = P(keyOfPd(a.user_id), personName(null, a.user_id));
+    if (a.done) p.actsDone++; else p.actsOpen++;
+  }
+  for (const c of comments) P(c.authorKey, c.author).comments++;
+  for (const a of nextActs) P(keyOfPd(a.user_id), personName(null, a.user_id)).nextWeek++;
+  for (const a of aiItems) {
+    if (a.authorKey === "ai") continue;
+    const p = P(a.authorKey, a.author);
+    p.ai++;
+    if (typeof a.reviewScore === "number") p.aiReview.push(a.reviewScore);
+    if (a.clientMood) { const k = moodKey(a.clientMood); p.moods[k] = (p.moods[k] ?? 0) + 1; }
+  }
+  const sellers = [...people.values()]
+    .map((p) => ({
+      ...p,
+      aiReviewAvg: p.aiReview.length ? Math.round((p.aiReview.reduce((s: number, x: number) => s + x, 0) / p.aiReview.length) * 10) / 10 : null,
+      aiReview: undefined,
+      topMoods: Object.entries(p.moods).sort((a: any, b: any) => b[1] - a[1]).slice(0, 3).map(([name, count]) => ({ name, count })),
+      moods: undefined,
+      pdUser: !!pdUserByEmail.get(p.key),
+    }))
+    .filter((p) => p.calls || p.comments || p.actsDone || p.actsOpen || p.nextWeek || p.ai)
+    .sort((a, b) => (b.calls + b.comments) - (a.calls + a.comments));
+
+  // --- nastroje klientów + rozmowy wymagające uwagi ---
+  const moods: Record<string, number> = {};
+  for (const a of aiItems) if (a.clientMood) { const k = moodKey(a.clientMood); moods[k] = (moods[k] ?? 0) + 1; }
+  const clientOfAi = new Map<string, any>();
+  for (const c of clientList) for (const e of c.entries) if (e.kind === "ai") clientOfAi.set(e.id, { name: c.name, pdUrl: c.pdUrl, campaign: c.lead?.campaign ?? null });
+  const attention = aiItems
+    .filter((a) => (typeof a.reviewScore === "number" && a.reviewScore >= 4) || NEGATIVE_MOOD.test(String(a.clientMood ?? "")))
+    .map((a) => ({ ...a, client: clientOfAi.get(a.id) ?? null }))
+    .sort((a, b) => (b.reviewScore ?? 0) - (a.reviewScore ?? 0));
+
+  // --- lejek leadów: kontakt potwierdzony też ręcznym wpisem w Pipedrive (telefon spoza Ringostat) ---
+  const pdTouched = new Set<string>();
+  for (const n of humanNotes) if (n.lead_id) pdTouched.add(n.lead_id);
+  for (const a of acts) if (a.lead_id && (a.done || a.note)) pdTouched.add(a.lead_id);
+  const notCalled = (leadFunnel?.notCalled ?? []) as any[];
+  const contactedPdOnly = notCalled.filter((l) => l.pipedrive_lead_id && pdTouched.has(l.pipedrive_lead_id));
+  const funnel = {
+    ...leadFunnel,
+    pdOnly: contactedPdOnly.length,
+    notCalled: notCalled.filter((l) => !(l.pipedrive_lead_id && pdTouched.has(l.pipedrive_lead_id)))
+      .map((l) => ({ ...l, pdUrl: l.pipedrive_lead_id ? `https://${PD_DOMAIN}.pipedrive.com/leads/inbox/${l.pipedrive_lead_id}` : null })),
+  };
+
+  return {
+    week: { from, to, prevFrom, nextFrom, nextTo, isCurrent: from === mondayOf(today), isFuture: from > today },
+    stats, prev: { total: prev?.total ?? 0, outgoing: prev?.outgoing ?? 0, outgoingAnswered: prev?.outgoingAnswered ?? 0, incoming: prev?.incoming ?? 0,
+      incomingAnswered: prev?.incomingAnswered ?? 0, incomingMissed: prev?.incomingMissed ?? 0, talkSec: prev?.talkSec ?? 0, answered: prev?.answered ?? 0,
+      uniqueClients: prev?.uniqueClients ?? 0, missedNotCalledBack: prev?.missedNotCalledBack ?? 0, medianCallbackMin: prev?.medianCallbackMin ?? null },
+    funnel,
+    pipedrive: {
+      notes: humanNotes.length, comments: comments.length, aiNotes: aiNotes.length, aiApplied: toApply.length, bookings: bookingNotes,
+      actsDone: acts.filter((a) => a.done).length, actsOpen: acts.filter((a) => !a.done).length, nextWeek: nextActs.length,
+    },
+    sellers,
+    moods: Object.entries(moods).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count })),
+    attention,
+    clients: clientList,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method" }, 405);
@@ -379,6 +748,8 @@ Deno.serve(async (req: Request) => {
         if (!res.ok || !j.ok) throw new Error(j.error ?? `import ${res.status}`);
         return json({ ok: true, call_id: parsed.call_id, ai: j.ai });
       }
+      case "rs.weekly":
+        return json(await weeklyReport(secrets, body.week));
       case "rs.employees": {
         const { data } = await db.from("rs_employees").select("staff_id,fio,extension,online").order("extension");
         return json({ rows: data ?? [] });
