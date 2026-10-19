@@ -1,5 +1,5 @@
 // smart-report — Raport AI kampanii (Barabash AI, model lokalny Qwen).
-// Wywoływany co minutę przez pg_cron ({action:"tick"}) i od razu po zleceniu raportu w panelu.
+// pg_cron raz na godzinę ({action:"tick"}) — analiza nowych leadów w tle; zlecony raport liczy się krok po kroku od razu (smart_kick).
 //  1. synchronizacja Pipedrive → pd_notes (komentarze handlowców), pd_deals, notatki Ringostat AI → rs_calls
 //  2. analiza AI każdego leada (dossier → JSON), cache w lead_insights, przeliczana tylko gdy dossier się zmieni
 //  3. zlecone raporty: liczby per kampania / grupa reklam / reklama / odpowiedź z formularza + wnioski AI
@@ -224,7 +224,7 @@ async function llm(secrets: Secrets, system: string, user: string, maxTokens: nu
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${secrets.BARABASH_AI_KEY}` },
     body: JSON.stringify({
-      model: secrets.BARABASH_AI_MODEL || "qwen3.5:27b",
+      model: secrets.BARABASH_AI_MODEL || "qwen3.8:27b-q4_K_M",
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       temperature: 0.1, max_tokens: maxTokens, response_format: { type: "json_object" },
     }),
@@ -264,7 +264,7 @@ async function analyzeLead(secrets: Secrets, leadId: string, d: any, text: strin
       quality_issues: (Array.isArray(r.quality_issues) ? r.quality_issues : []).map(String).filter((x: string) => x && x !== "null").slice(0, 5),
     };
     await db.from("lead_insights").upsert({
-      lead_id: leadId, hash, source: "llm", model: secrets.BARABASH_AI_MODEL || "qwen3.5:27b",
+      lead_id: leadId, hash, source: "llm", model: secrets.BARABASH_AI_MODEL || "qwen3.8:27b-q4_K_M",
       status: pick(r.status, STATUSES, "cieply"), interest: Math.max(0, Math.min(10, Math.round(Number(r.interest) || 0))),
       price: pick(r.price, PRICES, "nie_rozmawiano"), quality: pick(r.quality, QUALITIES, "sredni"), intent: pick(r.intent, INTENTS, "nieznany"),
       objections: objections.map((o: any) => o.type), result, error: null, analyzed_at: new Date().toISOString(),
@@ -324,7 +324,7 @@ async function prepare(rows: any[]) {
   for (let i = 0; i < ruleRows.length; i += 500) await db.from("lead_insights").upsert(ruleRows.slice(i, i + 500));
   return { queue, rules: ruleRows.length };
 }
-async function runQueue(secrets: Secrets, queue: any[], deadline: number, onDone?: (n: number) => Promise<void>) {
+async function runQueue(secrets: Secrets, queue: any[], deadline: number, onDone?: (n: number) => Promise<void>, parallel = PARALLEL) {
   let i = 0, done = 0;
   const worker = async () => {
     while (i < queue.length && Date.now() < deadline - 55_000) {
@@ -334,7 +334,7 @@ async function runQueue(secrets: Secrets, queue: any[], deadline: number, onDone
       if (onDone && done % 3 === 0) await onDone(done);
     }
   };
-  await Promise.all(Array.from({ length: PARALLEL }, worker));
+  await Promise.all(Array.from({ length: parallel }, worker));
   return done;
 }
 
@@ -583,7 +583,7 @@ async function tick(secrets: Secrets, body: any) {
   if (Date.now() < deadline - 45_000) {
     const rows = await loadDossiers(null, new Date(`${SYNC_FROM}T00:00:00Z`).toISOString());
     const { queue, rules } = await prepare(rows);
-    const done = await runQueue(secrets, queue, deadline);
+    const done = await runQueue(secrets, queue, deadline, undefined, 2);
     out.background = { pending: queue.length - done, analyzed: done, rules };
     await setSetting("smart_bg_status", { at: new Date().toISOString(), pending: queue.length - done, total: rows.length });
   }
@@ -597,12 +597,17 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({}));
   const { data: locked } = await db.rpc("smart_try_lock", { p_ttl: 170 });
   if (!locked) return Response.json({ ok: true, busy: true });
+  let res: Response;
   try {
     const out = await tick(secrets, body);
-    return Response.json({ ok: true, ...out });
+    res = Response.json({ ok: true, ...out });
   } catch (e) {
-    return Response.json({ ok: false, error: String((e as Error).message ?? e) }, { status: 500 });
+    res = Response.json({ ok: false, error: String((e as Error).message ?? e) }, { status: 500 });
   } finally {
     await db.rpc("smart_unlock");
   }
+  // cron chodzi raz na godzinę; zlecony raport liczy się dalej od razu (kolejny krok przez pg_net), aż będzie gotowy
+  const { data: active } = await db.from("ai_reports").select("id").in("status", ["queued", "analyzing", "summarizing"]).limit(1);
+  if (active?.length) await db.rpc("smart_kick");
+  return res!;
 });
