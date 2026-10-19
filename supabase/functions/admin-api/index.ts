@@ -748,6 +748,55 @@ Deno.serve(async (req: Request) => {
         if (!res.ok || !j.ok) throw new Error(j.error ?? `import ${res.status}`);
         return json({ ok: true, call_id: parsed.call_id, ai: j.ai });
       }
+      // ---- Raport AI kampanii (liczy edge smart-report w tle) ----
+      case "smart.options": {
+        const camps: Record<string, { name: string; leads: number; first: string; last: string }> = {};
+        for (let off = 0; ; off += 1000) {
+          const { data } = await db.from("leads").select("campaign_name,form_name,received_at").neq("status", "skipped").range(off, off + 999);
+          for (const l of data ?? []) {
+            const n = l.campaign_name || l.form_name || "(nieznana)";
+            const c = (camps[n] ??= { name: n, leads: 0, first: l.received_at, last: l.received_at });
+            c.leads++; if (l.received_at < c.first) c.first = l.received_at; if (l.received_at > c.last) c.last = l.received_at;
+          }
+          if ((data ?? []).length < 1000) break;
+        }
+        const { count: analyzed } = await db.from("lead_insights").select("*", { count: "exact", head: true }).eq("source", "llm").not("status", "is", null);
+        const { count: cached } = await db.from("lead_insights").select("*", { count: "exact", head: true });
+        const { data: st } = await db.from("settings").select("key,value").in("key", ["smart_pd_sync_result", "smart_bg_status"]);
+        const s = Object.fromEntries((st ?? []).map((x) => [x.key, x.value]));
+        return json({
+          campaigns: Object.values(camps).sort((a, b) => b.last.localeCompare(a.last)),
+          cache: { analyzed: analyzed ?? 0, cached: cached ?? 0, bg: s.smart_bg_status ?? null }, sync: s.smart_pd_sync_result ?? null,
+        });
+      }
+      case "smart.create": {
+        const from = String(body.from ?? "").slice(0, 10), to = String(body.to ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new Error("Nieprawidłowy zakres dat");
+        const campaigns = Array.isArray(body.campaigns) ? body.campaigns.map(String).slice(0, 50) : [];
+        const { data, error } = await db.from("ai_reports").insert({ created_by: user.username, params: { from, to, campaigns }, status: "queued", progress: { stage: "w kolejce" } }).select("id").single();
+        if (error) throw new Error(error.message);
+        // start od razu (worker i tak rusza co minutę)
+        fetch(`${SUPABASE_URL}/functions/v1/smart-report`, {
+          method: "POST", headers: { "content-type": "application/json", "x-internal-token": secrets.INTERNAL_TOKEN }, body: '{"action":"tick"}',
+        }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 300));
+        return json({ id: data.id });
+      }
+      case "smart.list": {
+        const { data } = await db.from("ai_reports").select("id,params,status,progress,error,created_by,created_at,finished_at").order("created_at", { ascending: false }).limit(30);
+        return json({ rows: data ?? [] });
+      }
+      case "smart.get": {
+        const { data } = await db.from("ai_reports").select("*").eq("id", body.id).maybeSingle();
+        if (!data) throw new Error("Nie znaleziono raportu");
+        if (!body.full && data.status !== "done") { delete (data as any).data; }
+        return json({ report: data });
+      }
+      case "smart.delete":
+        needAdmin();
+        await db.from("ai_reports").delete().eq("id", body.id);
+        return json({ ok: true });
+
       case "rs.weekly":
         return json(await weeklyReport(secrets, body.week));
       case "rs.employees": {

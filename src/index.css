@@ -355,3 +355,27 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background:
   .wk-client { break-inside: avoid; background: none; }
   .stat .v.red, .link { color: #c8101c !important; }
 }
+
+/* raport AI kampanii */
+.sr-top { grid-template-columns: 1.6fr 1fr; }
+.sr-camps { max-height: 230px; overflow: auto; border: 1px solid var(--border); background: rgba(0,0,0,.15); }
+.sr-camp { display: flex; gap: 8px; padding: 7px 10px; border-bottom: 1px solid rgba(255,90,100,.07); width: 100%; font-size: 12.5px; color: var(--text); }
+.sr-camp.dim { opacity: .5; }
+.sr-bar { display: flex; height: 18px; background: rgba(255,255,255,.04); overflow: hidden; }
+.sr-bar > div { height: 100%; }
+.sr-bar > div:hover { filter: brightness(1.3); }
+.sr-chip { display: inline-block; font-size: 10.5px; padding: 1px 7px; margin-left: 6px; color: #fff; vertical-align: 1px; }
+.sr-chip.ghost { background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--muted); margin-left: 0; margin-right: 4px; }
+.sr-verdict { font-size: 11px; font-weight: 700; padding: 3px 9px; text-transform: uppercase; letter-spacing: .4px; }
+.v-good { background: rgba(53,196,107,.18); color: var(--green); }
+.v-mid { background: rgba(106,165,255,.16); color: #8db8ff; }
+.v-warn { background: rgba(240,169,44,.18); color: var(--amber); }
+.v-bad { background: var(--red-soft); color: var(--red-2); }
+.sr-rec ul { margin: 4px 0 0; padding-left: 18px; font-size: 13.5px; line-height: 1.55; }
+.sr-rec li { margin-bottom: 4px; }
+.sr-quote { font-size: 13px; line-height: 1.5; padding: 6px 10px; border-left: 2px solid var(--red); background: rgba(255,255,255,.03); margin-bottom: 6px; }
+.sr-lead { border: 1px solid var(--border); background: rgba(0,0,0,.14); padding: 10px 12px; }
+.sr-total td { border-top: 1px solid var(--border); background: rgba(255,255,255,.03); }
+.green-t { color: var(--green); font-weight: 600; }
+.red-t { color: var(--red-2); font-weight: 600; }
+@media print { .sr-card { break-inside: auto; } .ai-box { background: none !important; } }

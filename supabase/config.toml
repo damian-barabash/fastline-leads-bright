@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.ringostat-webhook]
 verify_jwt = false
+
+[functions.smart-report]
+verify_jwt = false

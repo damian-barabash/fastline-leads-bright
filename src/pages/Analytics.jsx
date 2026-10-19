@@ -5,6 +5,7 @@ import { defaultRange } from "./analytics/shared.jsx";
 import Overview from "./analytics/Overview.jsx";
 import Calls from "./analytics/Calls.jsx";
 import Weekly from "./analytics/Weekly.jsx";
+import SmartReport from "./analytics/SmartReport.jsx";
 import Missed from "./analytics/Missed.jsx";
 import Live from "./analytics/Live.jsx";
 import Integration from "./analytics/Integration.jsx";
@@ -15,6 +16,7 @@ import CallModal from "./analytics/CallModal.jsx";
 const TABS = [
   { key: "overview", label: "Przegląd" },
   { key: "weekly", label: "Raport tygodniowy" },
+  { key: "ai", label: "Raport AI kampanii" },
   { key: "calls", label: "Rozmowy" },
   { key: "missed", label: "Do oddzwonienia" },
   { key: "live", label: "Zespół na żywo" },
@@ -56,6 +58,7 @@ export default function Analytics() {
 
       {tab === "overview" && <Overview {...common} openCalls={openCalls} />}
       {tab === "weekly" && <Weekly onOpen={setOpenId} />}
+      {tab === "ai" && <SmartReport />}
       {tab === "calls" && <Calls {...common} preset={callsPreset} onOpen={setOpenId} />}
       {tab === "missed" && <Missed range={range} setRange={setRange} onOpen={setOpenId} />}
       {tab === "live" && <Live />}
