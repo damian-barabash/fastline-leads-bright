@@ -38,6 +38,8 @@ const VERDICT = {
   zmien_grupe: { label: "Zmień grupę odbiorców", cls: "v-warn" }, zmien_oferte: { label: "Zmień ofertę", cls: "v-warn" },
   wstrzymaj: { label: "Wstrzymaj", cls: "v-bad" },
 };
+// przenoszenie długich nazw kampanii po "_"
+const brk = (s) => String(s ?? "").replace(/_/g, "_\u200b");
 const lbl = (map, k) => map[k] ?? String(k ?? "—").replace(/_/g, " ");
 const fmtH = (h) => (h === null || h === undefined ? "—" : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`);
 
@@ -167,16 +169,16 @@ function LeadList({ leads, filter, setFilter }) {
 
 function SegmentTable({ rows, onPick, kind }) {
   return (
-    <table className="tbl">
+    <div className="sr-scroll"><table className="tbl sr-tbl">
       <thead><tr><th>{kind === "adset" ? "Grupa reklam" : kind === "ad" ? "Reklama" : "Odpowiedź"}</th>{METRIC_HEAD}</tr></thead>
       <tbody>
         {rows.map((r) => (
           <tr key={r.name ?? r.answer} className={onPick ? "clickable" : ""} onClick={() => onPick?.(r)}>
-            <td><b>{r.name ?? r.answer}</b></td><MetricCells m={r} />
+            <td><b>{brk(r.name ?? r.answer)}</b></td><MetricCells m={r} />
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 
@@ -360,21 +362,21 @@ function ReportView({ id, onDeleted }) {
 
       <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "18px 20px 4px" }}><h3>Porównanie kampanii</h3></div>
-        <table className="tbl">
+        <div className="sr-scroll"><table className="tbl sr-tbl">
           <thead><tr><th>Kampania</th>{METRIC_HEAD}<th>Werdykt AI</th></tr></thead>
           <tbody>
             {d.campaigns.map((c) => {
               const v = VERDICT[res.campaigns?.[c.name]?.verdict];
               return (
                 <tr key={c.name} className="clickable" onClick={() => { setOpen({ ...open, [c.name]: true }); document.getElementById("sr-" + c.name)?.scrollIntoView({ behavior: "smooth" }); }}>
-                  <td><b className="small">{c.name}</b></td><MetricCells m={c} />
+                  <td><b className="small">{brk(c.name)}</b></td><MetricCells m={c} />
                   <td>{v ? <span className={"sr-verdict " + v.cls}>{v.label}</span> : <span className="muted small">—</span>}</td>
                 </tr>
               );
             })}
             <tr className="sr-total"><td><b>Razem</b></td><MetricCells m={d.totals} /><td /></tr>
           </tbody>
-        </table>
+        </table></div>
         <div className="small muted" style={{ padding: "10px 20px 14px" }}>
           Procenty „gorący + ciepły”, „zimny + niezaint.”, „błędne”, „za drogo” — od leadów, z którymi była rozmowa przeanalizowana przez AI. „Bez rozmowy” — nie odebrał lub nikt nie dzwonił, od wszystkich leadów.
         </div>
