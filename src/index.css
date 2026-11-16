@@ -389,3 +389,22 @@ table.sr-tbl td:first-child { white-space: normal; overflow-wrap: break-word; mi
 table.sr-tbl td:first-child b { font-size: 12.5px; }
 .sr-verdict { white-space: nowrap; }
 @media print { .sr-scroll { overflow: visible; } }
+
+/* kampanie: statystyki + komentarz AI */
+.cs-warn { border-color: rgba(240, 169, 44, 0.45); background: rgba(240, 169, 44, 0.07); font-size: 13.5px; line-height: 1.55; }
+.cs-warn code { background: rgba(255,255,255,.08); padding: 1px 5px; font-size: 12px; }
+.cs-ai { border-left: 3px solid var(--red); }
+.cs-headline { font-size: 16px; font-weight: 700; line-height: 1.45; margin-bottom: 8px; }
+.cs-summary { margin: 0 0 14px; font-size: 13.5px; line-height: 1.6; color: var(--text); }
+.cs-aicamps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+.cs-aicamp { border: 1px solid var(--border); background: rgba(0,0,0,.14); padding: 10px 12px; line-height: 1.5; }
+.cs-weeks { display: flex; align-items: flex-end; gap: 6px; height: 170px; padding-bottom: 34px; }
+.cs-wcol { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; min-width: 0; }
+.cs-wbar { width: 100%; min-height: 3px; background: linear-gradient(180deg, var(--red-2), rgba(225,29,42,0.25)); }
+.cs-wbar.partial { opacity: .45; }
+.cs-wcol:hover .cs-wbar { filter: brightness(1.25); }
+.cs-wval { font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+.cs-wlbl { position: absolute; bottom: -18px; font-size: 10px; color: var(--muted-2); white-space: nowrap; }
+.cs-wcpl { position: absolute; bottom: -32px; font-size: 10px; color: var(--amber); white-space: nowrap; }
+table.cs-tbl tr.cs-sub td { background: rgba(0,0,0,.18); font-size: 12px; }
+@media print { .cs-ai { border-left-width: 1px; } }

@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.smart-report]
 verify_jwt = false
+
+[functions.campaign-stats]
+verify_jwt = false

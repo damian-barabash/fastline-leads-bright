@@ -516,6 +516,141 @@ async function weeklyReport(secrets: Record<string, string>, weekIn?: string) {
   };
 }
 
+// ---- Kampanie: statystyki (cs_stats) + komentarz AI (edge campaign-stats) ----
+const csAddDays = (ds: string, n: number) => { const d = new Date(ds + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const csMonday = (ds: string) => { const d = new Date(ds + "T12:00:00Z"); return csAddDays(ds, -((d.getUTCDay() + 6) % 7)); };
+const csDiff = (a: string, b: string) => Math.round((new Date(b + "T12:00:00Z").getTime() - new Date(a + "T12:00:00Z").getTime()) / 864e5);
+const r2 = (x: number | null) => (x === null || !isFinite(x) ? null : Math.round(x * 100) / 100);
+
+async function csRpc(from: string, to: string) {
+  const { data, error } = await db.rpc("cs_stats", { p_from: from, p_to: to });
+  if (error) throw new Error(error.message);
+  return data as any;
+}
+// metryki pochodne jednego wiersza (kampania / grupa / suma)
+function csDerive(m: any, hasSpend: boolean) {
+  const spend = hasSpend ? Number(m.spend ?? 0) : null;
+  const imp = Number(m.impressions ?? 0), clk = Number(m.clicks ?? 0);
+  return {
+    ...m,
+    spend,
+    cpl: spend !== null && m.leads ? r2(spend / m.leads) : null,
+    cost_hot: spend !== null && m.hot ? r2(spend / m.hot) : null,
+    ctr: hasSpend && imp ? r2((clk / imp) * 100) : null,
+    cpm: spend !== null && imp ? r2((spend / imp) * 1000) : null,
+    cpc: spend !== null && clk ? r2(spend / clk) : null,
+    contact_pct: m.leads ? Math.round((m.contacted / m.leads) * 100) : null,
+    hot_pct: m.analyzed ? Math.round((m.hot / m.analyzed) * 100) : null,
+  };
+}
+const CS_SUM = ["leads", "contacted", "answered", "analyzed", "hot", "bought", "bad", "spend", "impressions", "reach", "clicks", "fb_leads"];
+function csTotal(rows: any[]) {
+  const t: any = {};
+  for (const k of CS_SUM) t[k] = rows.reduce((s, r) => s + Number(r[k] ?? 0), 0);
+  return t;
+}
+
+async function csReport(from: string, to: string) {
+  const len = csDiff(from, to) + 1;
+  const prevTo = csAddDays(from, -1), prevFrom = csAddDays(prevTo, -(len - 1));
+  const wFrom = csAddDays(csMonday(to), -7 * 11);
+  const [cur, prev, wk, st] = await Promise.all([
+    csRpc(from, to), csRpc(prevFrom, prevTo), csRpc(wFrom, to),
+    db.from("settings").select("key,value").in("key", ["cs_sync_result"]),
+  ]);
+  const syncRes = (st.data ?? []).find((r: any) => r.key === "cs_sync_result")?.value ?? null;
+  const { data: lastIns } = await db.from("fb_insights").select("date").order("date", { ascending: false }).limit(1);
+  const hasSpend = !!lastIns?.length; // jakiekolwiek dane z Meta w bazie
+  const hasSpendCur = hasSpend && cur.spend_days > 0;
+  const hasSpendPrev = hasSpend && prev.spend_days > 0;
+
+  const prevBy: Record<string, any> = {};
+  for (const c of prev.campaigns) prevBy[c.campaign_id] = c;
+  const ids = new Set<string>();
+  const campaigns = [...cur.campaigns, ...prev.campaigns.filter((c: any) => !cur.campaigns.some((x: any) => x.campaign_id === c.campaign_id))]
+    .filter((c: any) => { if (ids.has(c.campaign_id)) return false; ids.add(c.campaign_id); return true; })
+    .map((c: any) => {
+      const inCur = cur.campaigns.find((x: any) => x.campaign_id === c.campaign_id);
+      const base = inCur ?? { ...Object.fromEntries(CS_SUM.map((k) => [k, 0])), campaign_id: c.campaign_id, campaign_name: c.campaign_name, objective: c.objective };
+      const p = prevBy[c.campaign_id];
+      const adsets = cur.adsets.filter((a: any) => a.campaign_id === c.campaign_id).map((a: any) => csDerive(a, hasSpendCur));
+      return {
+        ...csDerive(base, hasSpendCur),
+        prev: p ? csDerive(p, hasSpendPrev) : null,
+        adsets,
+        state: !inCur ? "zatrzymana" : !p ? "nowa" : "aktywna",
+      };
+    })
+    .filter((c: any) => c.leads || c.spend || c.prev?.leads || c.prev?.spend);
+
+  // trend tygodniowy (12 tygodni do "to")
+  const weeksMap: Record<string, any> = {};
+  for (const d of wk.days) {
+    const w = csMonday(d.date);
+    weeksMap[w] ??= { week: w, leads: 0, hot: 0, spend: 0, fb_leads: 0, days: 0 };
+    weeksMap[w].leads += d.leads; weeksMap[w].hot += d.hot;
+    weeksMap[w].spend += Number(d.spend ?? 0); weeksMap[w].fb_leads += Number(d.fb_leads ?? 0); weeksMap[w].days += 1;
+  }
+  const weeks = Object.values(weeksMap).sort((a: any, b: any) => a.week.localeCompare(b.week)).map((w: any) => ({
+    ...w, spend: hasSpend ? r2(w.spend) : null, cpl: hasSpend && w.leads ? r2(w.spend / w.leads) : null, partial: w.days < 7,
+  }));
+
+  return {
+    range: { from, to, days: len }, prevRange: { from: prevFrom, to: prevTo },
+    hasSpend, hasSpendCur, currency: cur.currency ?? prev.currency ?? "PLN",
+    total: csDerive(csTotal(cur.campaigns), hasSpendCur),
+    prevTotal: csDerive(csTotal(prev.campaigns), hasSpendPrev),
+    campaigns,
+    days: cur.days.map((d: any) => ({ ...d, spend: hasSpendCur ? r2(Number(d.spend ?? 0)) : null })),
+    weeks,
+    sync: syncRes,
+  };
+}
+
+// kompaktowe dane dla AI (bez grup reklam z zerami, zaokrąglone)
+function csAiInput(r: any) {
+  const pick = (m: any) => m && ({
+    leady: m.leads, wydatki: m.spend !== null ? Math.round(m.spend) : undefined, cpl: m.cpl !== null ? Math.round(m.cpl) : undefined,
+    ctr_proc: m.ctr ?? undefined, cpm: m.cpm !== null && m.cpm !== undefined ? Math.round(m.cpm) : undefined,
+    kontakt_proc: m.contact_pct, odebrane: m.answered, ocenione_ai: m.analyzed, gorace: m.hot, kupione: m.bought, bledne: m.bad,
+    leady_wg_meta: r.hasSpend ? m.fb_leads : undefined,
+  });
+  return {
+    okres: `${r.range.from} — ${r.range.to} (${r.range.days} dni)`,
+    poprzedni_okres: `${r.prevRange.from} — ${r.prevRange.to}`,
+    wydatki_dostepne: r.hasSpendCur,
+    waluta: r.currency,
+    suma: { teraz: pick(r.total), poprzednio: pick(r.prevTotal) },
+    kampanie: r.campaigns.slice(0, 14).map((c: any) => ({
+      nazwa: c.campaign_name, stan: c.state, teraz: pick(c), poprzednio: pick(c.prev),
+      grupy_reklam: c.adsets.filter((a: any) => a.leads || a.spend).slice(0, 5).map((a: any) => ({
+        nazwa: a.adset_name, leady: a.leads, wydatki: a.spend !== null ? Math.round(a.spend) : undefined, cpl: a.cpl !== null ? Math.round(a.cpl) : undefined, gorace: a.hot,
+      })),
+    })),
+    tygodnie: r.weeks.slice(-8).map((w: any) => ({ od: w.week, leady: w.leads, wydatki: w.spend !== null ? Math.round(w.spend) : undefined, cpl: w.cpl !== null ? Math.round(w.cpl) : undefined, gorace: w.hot, niepelny: w.partial || undefined })),
+  };
+}
+
+async function sha256(s: string) {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+}
+
+function fireCampaignStats(payload: unknown, secrets: Record<string, string>) {
+  const p = fetch(`${SUPABASE_URL}/functions/v1/campaign-stats`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json", "x-internal-token": secrets.INTERNAL_TOKEN ?? "",
+      apikey: SERVICE_ROLE, authorization: `Bearer ${SERVICE_ROLE}`,
+    },
+    body: JSON.stringify(payload),
+  }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(p);
+  return p;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method" }, 405);
@@ -1017,6 +1152,50 @@ Deno.serve(async (req: Request) => {
         needAdmin();
         await db.from("fb_forms").update({ archived: false }).eq("form_id", body.form_id);
         return json({ ok: true });
+      }
+
+      // ---------- Kampanie ----------
+      case "cs.report": {
+        const re = /^\d{4}-\d{2}-\d{2}$/;
+        if (!re.test(body.from ?? "") || !re.test(body.to ?? "") || body.from > body.to) throw new Error("Nieprawidłowy zakres dat");
+        if (csDiff(body.from, body.to) > 400) throw new Error("Zakres maksymalnie ~13 miesięcy");
+        const r = await csReport(body.from, body.to);
+        const key = `${body.from}|${body.to}|${await sha256(JSON.stringify(csAiInput(r)))}`;
+        // ostatni komentarz AI dla tego zakresu (także sprzed zmiany danych → oznaczony jako nieaktualny)
+        const { data: notes } = await db.from("campaign_ai_notes").select("id,key,status,result,error,created_at,finished_at")
+          .like("key", `${body.from}|${body.to}|%`).order("created_at", { ascending: false }).limit(5);
+        const fresh = (notes ?? []).find((n) => n.key === key);
+        const lastDone = (notes ?? []).find((n) => n.status === "done");
+        const ai = fresh ?? lastDone ?? null;
+        return json({ ...r, ai: ai ? { ...ai, stale: ai.key !== key } : null });
+      }
+      case "cs.ai": {
+        const r = await csReport(body.from, body.to);
+        const input = csAiInput(r);
+        const key = `${body.from}|${body.to}|${await sha256(JSON.stringify(input))}`;
+        const { data: ex } = await db.from("campaign_ai_notes").select("id,status,created_at").eq("key", key).maybeSingle();
+        const stuck = ex && ex.status === "running" && Date.now() - new Date(ex.created_at).getTime() > 180_000;
+        if (ex && !body.force && !stuck && ex.status !== "error") return json({ id: ex.id, status: ex.status });
+        let id = ex?.id;
+        if (ex) {
+          await db.from("campaign_ai_notes").update({ status: "queued", error: null, result: null, input, created_at: new Date().toISOString(), created_by: user.username }).eq("id", ex.id);
+        } else {
+          const { data: ins, error } = await db.from("campaign_ai_notes")
+            .insert({ key, params: { from: body.from, to: body.to }, input, created_by: user.username }).select("id").single();
+          if (error) throw new Error(error.message);
+          id = ins.id;
+        }
+        fireCampaignStats({ action: "ai", id }, secrets);
+        return json({ id, status: "queued" });
+      }
+      case "cs.aiGet": {
+        const { data } = await db.from("campaign_ai_notes").select("id,key,status,result,error,created_at,finished_at").eq("id", body.id).maybeSingle();
+        return json({ note: data });
+      }
+      case "cs.sync": {
+        needAdmin();
+        const res = await fireCampaignStats({ action: "sync", ...(body.full ? { from: "2026-07-01" } : {}) }, secrets);
+        return json(res);
       }
 
       default:
