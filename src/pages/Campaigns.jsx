@@ -146,8 +146,8 @@ function AiPanel({ ai, busy, err, onRun }) {
 const COLS = [
   { key: "campaign_name", label: "Kampania" },
   { key: "leads", label: "Leady" },
-  { key: "spend", label: "Wydatki", spend: true },
-  { key: "cpl", label: "Koszt leada", spend: true },
+  { key: "spend", label: "Wydatki", title: "Wydatki z Meta Ads w wybranym okresie" },
+  { key: "cpl", label: "Koszt leada", title: "Wydatki / leady, które wpadły do systemu" },
   { key: "ctr", label: "CTR", spend: true },
   { key: "cpm", label: "CPM", spend: true },
   { key: "contact_pct", label: "Kontakt" },
@@ -308,7 +308,7 @@ export default function Campaigns() {
                 <thead>
                   <tr>
                     {cols.map((c) => (
-                      <th key={c.key} className="clickable nowrap" onClick={() => setSort((s) => ({ key: c.key, dir: s.key === c.key ? -s.dir : c.key === "campaign_name" ? 1 : -1 }))}>
+                      <th key={c.key} title={c.title && !d?.hasSpend ? `${c.title} — pojawi się po podłączeniu danych z Meta` : c.title} className="clickable nowrap" onClick={() => setSort((s) => ({ key: c.key, dir: s.key === c.key ? -s.dir : c.key === "campaign_name" ? 1 : -1 }))}>
                         {c.label}{sort.key === c.key ? (sort.dir > 0 ? " ▲" : " ▼") : ""}
                       </th>
                     ))}
